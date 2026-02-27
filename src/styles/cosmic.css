@@ -1,0 +1,48 @@
+/* RNA Tooltip styles - used by CosmicBackground component */
+
+/* ─── RNA Tooltip ─── */
+.rna-tooltip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 100;
+  background: radial-gradient(ellipse at 30% 20%, rgba(8,22,32,0.96), rgba(4,14,22,0.94));
+  border: 1px solid rgba(0,180,210,0.18);
+  border-radius: 14px;
+  padding: 18px 22px;
+  min-width: 240px;
+  max-width: 310px;
+  backdrop-filter: blur(24px);
+  box-shadow: 0 0 50px rgba(0,150,200,0.12), inset 0 1px 0 rgba(255,255,255,0.06);
+  transition:
+    opacity 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.rna-tooltip__name {
+  font-family: 'Orbitron', 'SF Pro Display', -apple-system, sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+
+.rna-tooltip__desc {
+  font-size: 12.5px;
+  font-weight: 300;
+  line-height: 1.65;
+  color: rgba(170, 220, 230, 0.82);
+}
+
+.rna-tooltip__tag {
+  display: inline-block;
+  margin-top: 9px;
+  padding: 2px 9px;
+  border-radius: 20px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+/* ─── Star Hint Tooltip - Removed ─── */
+

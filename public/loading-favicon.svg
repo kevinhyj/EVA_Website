@@ -1,0 +1,20 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Animated loading favicon - displays in browser tab during loading -->
+  <style>
+    .loader { animation: spin 1s linear infinite; transform-origin: center; }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+  </style>
+
+  <!-- Background circle -->
+  <circle cx="16" cy="16" r="14" stroke="#020617" stroke-width="2" fill="#f97316"/>
+
+  <!-- Spinning element -->
+  <g class="loader">
+    <path d="M16 4 L16 10 M16 22 L16 28 M4 16 L10 16 M22 16 L28 16"
+          stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+    <circle cx="16" cy="16" r="6" stroke="#ffffff" stroke-width="2" fill="none"/>
+  </g>
+
+  <!-- Center dot -->
+  <circle cx="16" cy="16" r="3" fill="#3b82f6"/>
+</svg>
