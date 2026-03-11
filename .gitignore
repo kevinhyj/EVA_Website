@@ -30,6 +30,16 @@
 *.PNG
 *.svg
 *.SVG
+*.webp
+*.WEBP
+*.ico
+*.gif
+
+# runtime data
+/data/
+
+# logs
+nohup.out
 
 # debug
 npm-debug.log*
