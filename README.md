@@ -1,8 +1,8 @@
 <div align="center">
 
-# RNAVerse
+# EVA
 
-**The First Generative Model for RNA Design**
+**Unified RNA Generative model for RNA design**
 
 **首个RNA设计生成模型**
 
@@ -17,9 +17,9 @@
 
 ## Overview | 概述
 
-RNAVerse is a revolutionary RNA design platform powered by a Mixture of Experts (MoE) architecture, trained on 231.3 billion nucleotides. It provides multi-level controllable design capabilities for various RNA types with real-time generation.
+EVA is a revolutionary RNA design platform powered by a Mixture of Experts (MoE) architecture, trained on 231.3 billion nucleotides. It provides multi-level controllable design capabilities for various RNA types with real-time generation.
 
-RNAVerse 是一个革命性的RNA设计平台，采用混合专家（MoE）架构，基于2313亿个核苷酸进行训练。它为各种RNA类型提供多级可控设计能力，支持实时生成。
+EVA 是一个革命性的RNA设计平台，采用混合专家（MoE）架构，基于2313亿个核苷酸进行训练。它为各种RNA类型提供多级可控设计能力，支持实时生成。
 
 ---
 

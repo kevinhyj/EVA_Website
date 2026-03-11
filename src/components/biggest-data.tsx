@@ -48,14 +48,24 @@ export function BiggestData() {
               </div>
             </div>
 
-            {/* Second row: radar chart */}
-            <div className="relative aspect-video">
-              <Image
-                src="/designcase/Biggest_data_3.png"
-                alt="Radar Chart"
-                fill
-                className="object-contain"
-              />
+            {/* Second row: two charts */}
+            <div className="flex flex-col md:flex-row gap-4 md:gap-0 items-stretch">
+              <div className="relative w-full md:w-1/2 h-[420px] md:h-[520px]">
+                <Image
+                  src="/designcase/Biggest_data_3.png"
+                  alt="Radar Chart"
+                  fill
+                  className="object-contain"
+                />
+              </div>
+              <div className="relative w-full md:w-1/2 h-[420px] md:h-[520px]">
+                <Image
+                  src="/designcase/Biggest_data_4.svg"
+                  alt="Comparison Chart"
+                  fill
+                  className="object-contain"
+                />
+              </div>
             </div>
           </div>
         </motion.div>

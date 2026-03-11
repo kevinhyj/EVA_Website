@@ -59,7 +59,7 @@ export function LargestParameters() {
                 <h3 className="text-lg font-bold">Scaling</h3>
                 <div className="relative aspect-video w-full">
                   <Image
-                    src="/designcase/largest_params_2.png"
+                    src="/designcase/largest_params_2.svg"
                     alt="Parameters Detail 1"
                     fill
                     className="object-contain"

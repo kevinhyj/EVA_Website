@@ -171,12 +171,10 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
     setResultSeq("");
     setResultScore(null);
     setTaskStatus("running");
-    setTaskMessage("Running task...");
+    setTaskMessage("Submitting task...");
 
-    // 生成 UUID 并保存当前参数到 localStorage
-    const taskId = crypto.randomUUID();
+    // 保存当前参数到 localStorage
     const sessionData = {
-      id: taskId,
       sequence,
       species,
       temperature,
@@ -188,17 +186,11 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
     };
     localStorage.setItem(`rna_session_${rnaType.id}`, JSON.stringify(sessionData));
 
-    // 根据 mode 调用不同的 API
-    const apiEndpoint = mode === "predict" ? "/api/scoring" : "/api/generate";
-
     try {
-      setTaskMessage("Submitting task...");
-
-      const response = await fetch(apiEndpoint, {
+      // 提交任务到后端 API
+      const submitResponse = await fetch("/api/task/submit", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sequence,
           species,
@@ -207,68 +199,81 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
           maxLength,
           mode,
           rnaTypeId: rnaType.id,
-          taskId,
         }),
       });
 
-      if (!response.ok) {
-        throw new Error(mode === "predict" ? "Scoring failed" : "Generation failed");
+      if (!submitResponse.ok) {
+        const errData = await submitResponse.json().catch(() => ({}));
+        throw new Error(errData.error || "Failed to submit task");
       }
 
-      setTaskMessage("Executing Python script...");
+      const submitData = await submitResponse.json();
+      const taskId = submitData.task_id;
 
-      const data = await response.json();
+      if (!taskId) {
+        throw new Error("No task_id returned from backend");
+      }
 
-      // API 已等待脚本执行完毕，直接使用返回的结果
-      // 当 status 不是 running 时，清理 localStorage 中的 session 信息和输出目录
-      if (data.status === "completed" || data.status === "completed_no_result") {
-        setTaskStatus("completed");
-        setTaskMessage(data.message || "Task completed");
-        // 清理 localStorage 和输出目录
-        localStorage.removeItem(`rna_session_${rnaType.id}`);
-        // 删除输出目录
-        fetch(`/api/result?taskId=${taskId}`, { method: "DELETE" });
+      setTaskMessage("Task submitted, waiting for inference...");
 
-        if (mode === "predict") {
-          setResultScore(data.score ?? null);
-        } else {
-          // 从返回的 sequence 中提取实际序列（去掉 FASTA 头）
-          const seq = data.sequence || "";
-          const lines = seq.split("\n");
-          const actualSeq = lines.length > 1 ? lines.slice(1).join("") : seq;
-          setResultSeq(actualSeq || "");
+      // 轮询任务状态
+      const POLL_INTERVAL = 2000; // 2秒
+      const MAX_POLLS = 150;      // 最多轮询5分钟
+      let polls = 0;
+
+      while (polls < MAX_POLLS) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+        polls++;
+
+        const statusResponse = await fetch(`/api/task/status/${taskId}`);
+        if (!statusResponse.ok) {
+          throw new Error("Failed to check task status");
         }
-      } else if (data.status === "completed_with_error" || data.status === "failed") {
-        setTaskStatus("error");
-        setTaskMessage(data.error || "Task execution error");
-        // 清理 localStorage 和输出目录
-        localStorage.removeItem(`rna_session_${rnaType.id}`);
-        // 删除输出目录
-        fetch(`/api/result?taskId=${taskId}`, { method: "DELETE" });
-        // 脚本执行出错，使用 fallback
-        if (mode === "predict") {
-          setResultScore(parseFloat((Math.random() * 0.6 + 0.4).toFixed(4)));
-        } else {
-          const len = mode === "clm" ? maxLength : sequence.replace(/<mask>/gi, "").length + 20;
-          setResultSeq(randomSeq(Math.min(len, MAX_SEQ_LEN)));
+
+        const statusData = await statusResponse.json();
+        const progress = statusData.progress ?? 0;
+        setTaskMessage(`Inference in progress... ${Math.round(progress * 100)}%`);
+
+        if (statusData.status === "completed") {
+          setTaskStatus("completed");
+          setTaskMessage("Task completed");
+          localStorage.removeItem(`rna_session_${rnaType.id}`);
+
+          const result = statusData.result;
+          if (mode === "predict") {
+            // 后端可能返回 score 或 perplexity，统一处理
+            let score = result?.score;
+            if (score == null && result?.perplexity != null) {
+              // 将 perplexity 归一化为 0-1 分数（越低越好）
+              const ppl = result.perplexity;
+              score = Math.max(0, Math.min(1, 1 - Math.log10(ppl) / 4));
+            }
+            setResultScore(score ?? null);
+          } else {
+            let seq = result?.sequence || "";
+            // 清理模型特殊 token
+            seq = seq.replace(/<[^>]+>/g, "").replace(/\s+/g, "");
+            // 从 FASTA 格式中提取序列（去掉头行）
+            const lines = seq.split("\n");
+            const actualSeq = lines.length > 1 ? lines.filter((l: string) => !l.startsWith(">")).join("") : seq;
+            setResultSeq(actualSeq || "");
+          }
+          return; // 任务完成，退出
+        }
+
+        if (statusData.status === "failed") {
+          throw new Error(statusData.error || "Inference failed");
         }
       }
+
+      // 轮询超时
+      throw new Error("Task timed out after 5 minutes");
+
     } catch (error) {
-      console.error(mode === "predict" ? "Scoring error:" : "Generation error:", error);
+      console.error("Task error:", error);
       setTaskStatus("error");
       setTaskMessage(error instanceof Error ? error.message : "Task execution failed");
-      // 清理 localStorage 和输出目录
       localStorage.removeItem(`rna_session_${rnaType.id}`);
-      // 删除输出目录
-      fetch(`/api/result?taskId=${taskId}`, { method: "DELETE" });
-      // Fallback to mock data if API fails
-      await new Promise((r) => setTimeout(r, 500));
-      if (mode === "predict") {
-        setResultScore(parseFloat((Math.random() * 0.6 + 0.4).toFixed(4)));
-      } else {
-        const len = mode === "clm" ? maxLength : sequence.replace(/<mask>/gi, "").length + 20;
-        setResultSeq(randomSeq(Math.min(len, MAX_SEQ_LEN)));
-      }
     } finally {
       setIsRunning(false);
     }

@@ -54,24 +54,22 @@ export function MultiLevelDesign() {
                 </div>
                 <h3 className="text-lg font-bold">Generation conditioned on Species</h3>
               </div>
-              <div className="flex flex-col items-center" style={{ width: '660px', height: '500px', marginLeft: '20px', marginRight: '20px' }}>
+              <div className="flex flex-col items-center" style={{ height: '500px', marginLeft: '20px', marginRight: '20px' }}>
                 <div className="w-full h-full aspect-video relative mb-2">
                   <Image
                     src="/designcase/multi_level_3.svg"
                     alt="Multi-level 1"
-                    width={660}
-                    height={500}
+                    fill
                     className="object-contain"
                   />
                 </div>
               </div>
-              <div className="flex flex-col items-center" style={{ width: '660px', height: '500px', marginLeft: '20px', marginRight: '20px' }}>
+              <div className="flex flex-col items-center" style={{ height: '500px', marginLeft: '20px', marginRight: '20px' }}>
                 <div className="w-full h-full aspect-video relative mb-2">
                   <Image
                     src="/designcase/multi_level_4.svg"
                     alt="Multi-level 2"
-                    width={660}
-                    height={500}
+                    fill
                     className="object-contain"
                   />
                 </div>

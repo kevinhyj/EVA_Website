@@ -4,6 +4,7 @@ import { DesignCase } from "@/components/design-case";
 import { BiggestData } from "@/components/biggest-data";
 import { LargestParameters } from "@/components/largest-parameters";
 import { ZeroShotPrediction } from "@/components/zeroshot-prediction";
+import { AccurateRnaModeling } from "@/components/accurate-rna-modeling";
 import { MultiLevelDesign } from "@/components/multilevel-design";
 import { OpeningBlackBox } from "@/components/opening-blackbox";
 import { Team } from "@/components/team";
@@ -19,6 +20,7 @@ export default function Home() {
         <BiggestData />
         <LargestParameters />
         <ZeroShotPrediction />
+        <AccurateRnaModeling />
         <MultiLevelDesign />
         <OpeningBlackBox />
         <Team />

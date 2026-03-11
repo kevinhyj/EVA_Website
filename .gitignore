@@ -7,7 +7,6 @@
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
-
 # testing
 /coverage
 
@@ -21,6 +20,16 @@
 # misc
 .DS_Store
 *.pem
+
+# images
+*.jpg
+*.jpeg
+*.JPG
+*.JPEG
+*.png
+*.PNG
+*.svg
+*.SVG
 
 # debug
 npm-debug.log*

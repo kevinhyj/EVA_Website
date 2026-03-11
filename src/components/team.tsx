@@ -14,8 +14,8 @@ const teamMembers = [
     image: "/imgs/guangyelv.jpg",
   },
   {
-    name: "Anyue Chen",
-    image: "/imgs/anyuechen.jpg",
+    name: "Anyue Cheng",
+    image: "/imgs/anyuecheng.jpg",
   },
   {
     name: "Wei Xie",
@@ -103,7 +103,10 @@ export function Team() {
           </div> */}
         </motion.div>
 
-        <div className="flex flex-wrap justify-center gap-4" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center' }}>
+        <div
+          className="justify-center gap-4"
+          style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 120px)', justifyContent: 'center' }}
+        >
           {teamMembers.map((member, i) => (
             <motion.div
               key={member.name}
@@ -112,16 +115,16 @@ export function Team() {
               viewport={{ once: true }}
               transition={{ duration: 0.5, delay: i * 0.05 }}
               className="flex flex-col items-center"
-              style={{ width: '13%', minWidth: '120px', minHeight: '180px' }}
+              style={{ width: '120px', minWidth: '120px', minHeight: '150px' }}
             >
-              <div className="overflow-hidden" style={{ width: '120px', height: '180px' }}>
+              <div className="relative overflow-hidden rounded-full" style={{ width: '120px', height: '120px' }}>
                 {member.image ? (
                   <Image
                     src={member.image}
                     alt={member.name}
-                    width={150}
-                    height={200}
-                    className="object-contain"
+                    width={120}
+                    height={150}
+                    className="w-[120px] h-[150px] object-fill object-top"
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-primary/12 to-secondary/12 text-sm font-bold gradient-text-orange-blue">

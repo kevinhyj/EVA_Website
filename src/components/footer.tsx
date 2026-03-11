@@ -94,7 +94,7 @@ export function Footer() {
               </li>
               <li>
                 <a
-                  href="#"
+                  href="https://github.com/kevinhyj/EVA1"
                   className="text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
                   GitHub Repository
@@ -118,7 +118,7 @@ export function Footer() {
             </h3>
             <div className="flex gap-4">
               <a
-                href="#"
+                href="https://github.com/kevinhyj/EVA1"
                 className="p-2 rounded-full bg-muted/50 hover:bg-muted transition-colors"
               >
                 <Github className="w-5 h-5 text-muted-foreground" />

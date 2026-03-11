@@ -18,7 +18,7 @@ const geistMono = {
 export const metadata: Metadata = {
   title: "EVA - Evolutionary Versatile Architect",
   description:
-    "The First Generative World Model for RNA Design. Advanced AI-powered RNA sequence generation and optimization.",
+    "Unified RNA Generative model for RNA design.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

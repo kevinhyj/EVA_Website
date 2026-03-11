@@ -29,10 +29,10 @@ export function Contact() {
         >
           <div className="flex flex-col gap-8">
             {/* Social Media */}
-            <div className="flex justify-center gap-8 mt-4">
-              <div className="flex flex-col items-center">
+            <div className="flex flex-wrap justify-center gap-4 mt-4">
+              <div className="flex flex-col items-center" style={{ width: '30%', minWidth: '400px' }}>
                 <span className="text-sm text-muted-foreground mb-2">whatsapp</span>
-                <div className="relative aspect-video flex-1" style={{ height: '500px', width: '500px' }}>
+                <div className="relative w-full" style={{ height: '320px' }}>
                   <Image
                     src="/imgs/whatsapp.jpg"
                     alt="whatsapp"
@@ -41,9 +41,9 @@ export function Contact() {
                   />
                 </div>
               </div>
-              <div className="flex flex-col items-center">
+              <div className="flex flex-col items-center" style={{ width: '30%', minWidth: '400px' }}>
                 <span className="text-sm text-muted-foreground mb-2">WeChat</span>
-                <div className="relative aspect-video flex-1" style={{ height: '500px', width: '500px' }}>
+                <div className="relative w-full" style={{ height: '320px' }}>
                   <Image
                     src="/imgs/wechat.jpg"
                     alt="wechat"
@@ -52,9 +52,9 @@ export function Contact() {
                   />
                 </div>
               </div>
-              <div className="flex flex-col items-center">
+              <div className="flex flex-col items-center" style={{ width: '30%', minWidth: '400px' }}>
                 <span className="text-sm text-muted-foreground mb-2">xhs</span>
-                <div className="relative aspect-video flex-1" style={{ height: '500px', width: '500px' }}>
+                <div className="relative w-full" style={{ height: '320px' }}>
                   <Image
                     src="/imgs/redbook.jpg"
                     alt="xhs"
@@ -64,7 +64,6 @@ export function Contact() {
                 </div>
               </div>
             </div>
-
           </div>
         </motion.div>
       </div>

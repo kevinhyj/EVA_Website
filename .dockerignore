@@ -1,0 +1,15 @@
+node_modules
+.next
+.git
+data
+nohup.out
+*.log
+*.pdf
+*.pptx
+*.ppt
+__pycache__
+*.pyc
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local

@@ -33,7 +33,7 @@ export function OpeningBlackBox() {
                 <h3 className="text-xl font-bold text-primary mb-2">Align Neuron with Biological Property</h3>
                 <div className="relative aspect-video w-full">
                   <Image
-                    src="/designcase/open_black_box_1.png"
+                    src="/designcase/open_black_box_1.svg"
                     alt="Bar Chart 1"
                     fill
                     className="object-contain"

@@ -19,7 +19,7 @@ import {
 const navLinks = [
   { href: "/", label: "Home", icon: Home },
   { href: "#design", label: "Web Server", icon: Rocket },
-  { href: "https://github.com", label: "Github", icon: FileText },
+  { href: "https://github.com/kevinhyj/EVA1", label: "Github", icon: FileText },
   { href: "#team", label: "Team", icon: Users },
   { href: "/eva2", label: "EVA2", icon: Users },
 ];
