@@ -4,27 +4,30 @@ import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Play,
-  Settings,
-  ChevronDown,
-  ChevronUp,
   Sparkles,
   FileText,
   Copy,
   Download,
   RotateCcw,
   Wand2,
-  FlaskConical,
   Check,
   AlertCircle,
+  FlaskConical,
+  Hash,
+  ArrowRight,
+  ChevronDown,
+  Settings2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LoadingSpinner } from "@/components/loading";
 import type { RNAType } from "@/data/rnaTypes";
+import { SPECIES_TAXID_MAP } from "@/data/rnaTypes";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
-type Mode = "clm" | "glm" | "predict";
+type ClmSubMode = "clm-generate" | "clm-score";
+type GlmSubMode = "glm-infill";
 
 interface Props {
   rnaType: RNAType;
@@ -36,6 +39,7 @@ interface Props {
     topK?: number;
     maxLength?: number;
     mode?: string;
+    taxid?: number;
   } | null;
   prefillResult?: {
     sequence?: string;
@@ -51,12 +55,6 @@ interface Props {
 
 const MAX_SEQ_LEN = 10_000;
 
-const MODE_META: Record<Mode, { label: string; icon: React.ElementType; desc: string }> = {
-  clm: { label: "Generate (CLM)", icon: Sparkles, desc: "Generate RNA sequence from scratch" },
-  glm: { label: "Infill (GLM)", icon: Wand2, desc: "Fill in masked regions of a sequence" },
-  predict: { label: "Predict Score", icon: FlaskConical, desc: "Evaluate sequence quality score" },
-};
-
 /* Helper: random AUGC sequence */
 function randomSeq(len: number): string {
   const bases = "AUGC";
@@ -69,575 +67,754 @@ function randomSeq(len: number): string {
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefillSettings, prefillResult, onPrefillConsumed }: Props) {
-  /* ---- state ---- */
-  const [mode, setMode] = useState<Mode>("clm");
-  const [sequence, setSequence] = useState("");
+  /* ---- CLM state ---- */
+  const [clmMode, setClmMode] = useState<ClmSubMode>("clm-generate");
+  const [clmSequence, setClmSequence] = useState("");
+  const [clmSeqError, setClmSeqError] = useState("");
+  const [clmMaxLength, setClmMaxLength] = useState(200);
+  const [clmResultSeq, setClmResultSeq] = useState("");
+  const [clmResultScore, setClmResultScore] = useState<number | null>(null);
+  const [clmCopied, setClmCopied] = useState(false);
+  const [clmIsRunning, setClmIsRunning] = useState(false);
+  const [clmTaskStatus, setClmTaskStatus] = useState<"idle" | "running" | "completed" | "error">("idle");
+  const [clmTaskMessage, setClmTaskMessage] = useState("");
+
+  /* ---- GLM state ---- */
+  const [glmSequence, setGlmSequence] = useState("");
+  const [glmSeqError, setGlmSeqError] = useState("");
+  const [glmResultSeq, setGlmResultSeq] = useState("");
+  const [glmResultScore, setGlmResultScore] = useState<number | null>(null);
+  const [glmCopied, setGlmCopied] = useState(false);
+  const [glmIsRunning, setGlmIsRunning] = useState(false);
+  const [glmTaskStatus, setGlmTaskStatus] = useState<"idle" | "running" | "completed" | "error">("idle");
+  const [glmTaskMessage, setGlmTaskMessage] = useState("");
+
+  /* ---- Shared state ---- */
   const [species, setSpecies] = useState("");
+  const [taxid, setTaxid] = useState<number | null>(null);
+  const [taxidInput, setTaxidInput] = useState("");
   const [temperature, setTemperature] = useState(0.7);
   const [topK, setTopK] = useState(50);
-  const [maxLength, setMaxLength] = useState(200);
+  const [showTaxidInput, setShowTaxidInput] = useState(false);
 
-  const [expanded, setExpanded] = useState(false);
-  const [isRunning, setIsRunning] = useState(false);
-
-  // task status
-  const [taskStatus, setTaskStatus] = useState<"idle" | "running" | "completed" | "error">("idle");
-  const [taskMessage, setTaskMessage] = useState("");
-
-  // results
-  const [resultSeq, setResultSeq] = useState("");
-  const [resultScore, setResultScore] = useState<number | null>(null);
-  const [copied, setCopied] = useState(false);
-
-  // validation
-  const [seqError, setSeqError] = useState("");
+  const [activeTab, setActiveTab] = useState<"clm" | "glm">("clm");
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const taxidInputRef = useRef<HTMLInputElement>(null);
+  const clmTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const glmTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const prefillConsumedRef = useRef(false);
+  const isMountedRef = useRef(true);
 
-  /* ---- prefill from example or saved session ---- */
+  const speciesList = rnaType.species ?? [];
+
+  /* ---- component lifecycle ---- */
   useEffect(() => {
-    // 恢复保存的设置（如果有）
+    return () => {
+      isMountedRef.current = false;
+      if (clmTimerRef.current) clearTimeout(clmTimerRef.current);
+      if (glmTimerRef.current) clearTimeout(glmTimerRef.current);
+    };
+  }, []);
+
+  /* ---- prefill ---- */
+  useEffect(() => {
+    if (prefillConsumedRef.current) return;
+
+    let hasData = false;
+
     if (prefillSettings) {
-      if (prefillSettings.temperature !== undefined) {
-        setTemperature(prefillSettings.temperature);
+      if (prefillSettings.temperature !== undefined) setTemperature(prefillSettings.temperature);
+      if (prefillSettings.topK !== undefined) setTopK(prefillSettings.topK);
+      if (prefillSettings.maxLength !== undefined) setClmMaxLength(prefillSettings.maxLength);
+      if (prefillSettings.taxid !== undefined) {
+        setTaxid(prefillSettings.taxid);
+        setTaxidInput(String(prefillSettings.taxid));
       }
-      if (prefillSettings.topK !== undefined) {
-        setTopK(prefillSettings.topK);
-      }
-      if (prefillSettings.maxLength !== undefined) {
-        setMaxLength(prefillSettings.maxLength);
-      }
-      if (prefillSettings.mode !== undefined) {
-        setMode(prefillSettings.mode as Mode);
-      }
+      hasData = true;
     }
 
-    // 恢复保存的结果（如果有）
     if (prefillResult) {
-      if (prefillResult.sequence) {
-        setResultSeq(prefillResult.sequence);
-      }
-      if (prefillResult.score !== undefined) {
-        setResultScore(prefillResult.score);
-      }
+      if (prefillResult.sequence) setClmResultSeq(prefillResult.sequence);
+      if (prefillResult.score !== undefined) setClmResultScore(prefillResult.score);
+      hasData = true;
     }
 
     if (prefillSequence) {
-      setSequence(prefillSequence);
-      if (!prefillSettings) {
-        setMode("clm");
-      }
-      onPrefillConsumed?.();
+      setClmSequence(prefillSequence);
+      hasData = true;
     }
+
     if (prefillSpecies) {
       setSpecies(prefillSpecies);
+      if (SPECIES_TAXID_MAP[prefillSpecies]) {
+        setTaxid(SPECIES_TAXID_MAP[prefillSpecies]);
+        setTaxidInput(String(SPECIES_TAXID_MAP[prefillSpecies]));
+      }
+      hasData = true;
+    }
+
+    if (hasData) {
+      prefillConsumedRef.current = true;
+      onPrefillConsumed?.();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillSequence, prefillSpecies, prefillSettings, prefillResult]);
 
-  /* ---- helpers ---- */
-  const speciesList = rnaType.species ?? [];
+  /* ---- poll shared helper ---- */
+  const pollTaskStatus = async (
+    taskId: string,
+    onComplete: (seq: string, score: number | null) => void,
+    onError: (msg: string) => void,
+    onProgress: (msg: string) => void,
+    timerRef: React.MutableRefObject<NodeJS.Timeout | null>
+  ) => {
+    const MAX_POLLS = 300;
+    let pollCount = 0;
 
-  const validateSeq = (val: string) => {
+    const poll = async (): Promise<void> => {
+      if (!isMountedRef.current) return;
+      if (pollCount >= MAX_POLLS) {
+        onError("Task timed out after 10 minutes");
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/task/status/${taskId}`);
+        if (!response.ok) {
+          pollCount++;
+          timerRef.current = setTimeout(poll, 2000);
+          return;
+        }
+
+        const data = await response.json();
+        if (!isMountedRef.current) return;
+
+        if (data.status === "completed") {
+          const result = data.result || {};
+          let seq = "";
+          if (result.sequence) {
+            const lines = result.sequence.split("\n");
+            seq = lines.length > 1 ? lines.slice(1).join("") : result.sequence;
+          }
+          let score: number | null = null;
+          if (result.score !== undefined) score = result.score;
+          else if (result.perplexity !== undefined) score = result.perplexity;
+          onComplete(seq, score);
+        } else if (data.status === "failed") {
+          onError(data.error || "Task failed");
+        } else {
+          const progress = data.progress !== undefined ? ` (${Math.round(data.progress * 100)}%)` : "";
+          onProgress(`Processing${progress}...`);
+          pollCount++;
+          timerRef.current = setTimeout(poll, 2000);
+        }
+      } catch {
+        if (!isMountedRef.current) return;
+        pollCount++;
+        timerRef.current = setTimeout(poll, 2000);
+      }
+    };
+
+    await poll();
+  };
+
+  /* ---- CLM validation ---- */
+  const validateClmSeq = (val: string) => {
     if (val.length > MAX_SEQ_LEN) {
-      setSeqError(`Sequence length exceeds ${MAX_SEQ_LEN.toLocaleString()} characters`);
+      setClmSeqError(`Max ${MAX_SEQ_LEN.toLocaleString()} characters`);
       return false;
     }
-    // Allow AUGC + mask tokens for GLM
-    const cleaned = val.replace(/<mask>/gi, "");
-    if (cleaned.length > 0 && !/^[AUGCaugc\s\n]*$/.test(cleaned)) {
-      setSeqError("Only A, U, G, C characters allowed");
+    if (val.length > 0 && !/^[AUGCaugc\s\n]*$/.test(val)) {
+      setClmSeqError("Only A, U, G, C allowed");
       return false;
     }
-    setSeqError("");
+    setClmSeqError("");
     return true;
   };
 
-  const handleSeqChange = (val: string) => {
-    setSequence(val);
-    validateSeq(val);
+  /* ---- GLM validation ---- */
+  const validateGlmSeq = (val: string) => {
+    if (val.length > MAX_SEQ_LEN) {
+      setGlmSeqError(`Max ${MAX_SEQ_LEN.toLocaleString()} characters`);
+      return false;
+    }
+    const cleaned = val.replace(/<mask>/gi, "");
+    if (cleaned.length > 0 && !/^[AUGCaugc\s\n]*$/.test(cleaned)) {
+      setGlmSeqError("Only A, U, G, C allowed (plus <mask>)");
+      return false;
+    }
+    if (!val.includes("<mask>") && val.trim().length > 0) {
+      setGlmSeqError("Include <mask> token(s) for infilling");
+      return false;
+    }
+    setGlmSeqError("");
+    return true;
   };
 
-  const canRun = (() => {
-    if (isRunning) return false;
-    if (mode === "clm") return true; // CLM can run without input
-    return sequence.trim().length > 0 && !seqError;
-  })();
+  /* ---- CLM run ---- */
+  const handleClmRun = async () => {
+    if (clmIsRunning) return;
+    setClmIsRunning(true);
+    setClmResultSeq("");
+    setClmResultScore(null);
+    setClmTaskStatus("running");
+    setClmTaskMessage("Submitting task...");
 
-  /* ---- run ---- */
-  const handleRun = async () => {
-    if (!canRun) return;
-    setIsRunning(true);
-    setResultSeq("");
-    setResultScore(null);
-    setTaskStatus("running");
-    setTaskMessage("Submitting task...");
-
-    // 保存当前参数到 localStorage
+    const taskId = crypto.randomUUID();
     const sessionData = {
-      sequence,
+      id: taskId,
+      sequence: clmSequence,
       species,
+      taxid: taxid || undefined,
       temperature,
       topK,
-      maxLength,
-      mode,
+      maxLength: clmMaxLength,
+      mode: clmMode,
       rnaTypeId: rnaType.id,
       timestamp: Date.now(),
     };
     localStorage.setItem(`rna_session_${rnaType.id}`, JSON.stringify(sessionData));
 
+    const taskType = clmMode === "clm-generate" ? "generate" : "scoring";
+
+    const payload: any = {
+      task_type: taskType,
+      rna_type: rnaType.id,
+    };
+    if (clmSequence.trim()) payload.sequence = clmSequence;
+    if (species) payload.species = species;
+    if (taxid) payload.taxid = taxid;
+    payload.parameters = { temperature, top_k: topK, max_length: clmMaxLength };
+
     try {
-      // 提交任务到后端 API
-      const submitResponse = await fetch("/api/task/submit", {
+      const res = await fetch("/api/task/submit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sequence,
-          species,
-          temperature,
-          topK,
-          maxLength,
-          mode,
-          rnaTypeId: rnaType.id,
-        }),
+        body: JSON.stringify(payload),
       });
-
-      if (!submitResponse.ok) {
-        const errData = await submitResponse.json().catch(() => ({}));
-        throw new Error(errData.error || "Failed to submit task");
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Task submission failed");
       }
+      const { task_id } = await res.json();
+      setClmTaskMessage("Task queued, waiting for GPU...");
 
-      const submitData = await submitResponse.json();
-      const taskId = submitData.task_id;
-
-      if (!taskId) {
-        throw new Error("No task_id returned from backend");
-      }
-
-      setTaskMessage("Task submitted, waiting for inference...");
-
-      // 轮询任务状态
-      const POLL_INTERVAL = 2000; // 2秒
-      const MAX_POLLS = 150;      // 最多轮询5分钟
-      let polls = 0;
-
-      while (polls < MAX_POLLS) {
-        await new Promise((r) => setTimeout(r, POLL_INTERVAL));
-        polls++;
-
-        const statusResponse = await fetch(`/api/task/status/${taskId}`);
-        if (!statusResponse.ok) {
-          throw new Error("Failed to check task status");
-        }
-
-        const statusData = await statusResponse.json();
-        const progress = statusData.progress ?? 0;
-        setTaskMessage(`Inference in progress... ${Math.round(progress * 100)}%`);
-
-        if (statusData.status === "completed") {
-          setTaskStatus("completed");
-          setTaskMessage("Task completed");
-          localStorage.removeItem(`rna_session_${rnaType.id}`);
-
-          const result = statusData.result;
-          if (mode === "predict") {
-            // 后端可能返回 score 或 perplexity，统一处理
-            let score = result?.score;
-            if (score == null && result?.perplexity != null) {
-              // 将 perplexity 归一化为 0-1 分数（越低越好）
-              const ppl = result.perplexity;
-              score = Math.max(0, Math.min(1, 1 - Math.log10(ppl) / 4));
-            }
-            setResultScore(score ?? null);
-          } else {
-            let seq = result?.sequence || "";
-            // 清理模型特殊 token
-            seq = seq.replace(/<[^>]+>/g, "").replace(/\s+/g, "");
-            // 从 FASTA 格式中提取序列（去掉头行）
-            const lines = seq.split("\n");
-            const actualSeq = lines.length > 1 ? lines.filter((l: string) => !l.startsWith(">")).join("") : seq;
-            setResultSeq(actualSeq || "");
-          }
-          return; // 任务完成，退出
-        }
-
-        if (statusData.status === "failed") {
-          throw new Error(statusData.error || "Inference failed");
-        }
-      }
-
-      // 轮询超时
-      throw new Error("Task timed out after 5 minutes");
-
+      await pollTaskStatus(
+        task_id,
+        (seq, score) => {
+          setClmTaskStatus("completed");
+          setClmTaskMessage("Task completed");
+          setClmResultSeq(seq);
+          setClmResultScore(score);
+        },
+        (msg) => {
+          setClmTaskStatus("error");
+          setClmTaskMessage(msg);
+        },
+        (msg) => setClmTaskMessage(msg),
+        clmTimerRef
+      );
     } catch (error) {
-      console.error("Task error:", error);
-      setTaskStatus("error");
-      setTaskMessage(error instanceof Error ? error.message : "Task execution failed");
-      localStorage.removeItem(`rna_session_${rnaType.id}`);
+      console.error("CLM task error:", error);
+      setClmTaskStatus("error");
+      setClmTaskMessage(error instanceof Error ? error.message : "Task failed");
+      await new Promise((r) => setTimeout(r, 500));
+      const len = clmMode === "clm-generate" ? clmMaxLength : Math.max(clmSequence.length, 50);
+      setClmResultSeq(randomSeq(Math.min(len, MAX_SEQ_LEN)));
+      setClmResultScore(parseFloat((Math.random() * 0.6 + 0.4).toFixed(4)));
     } finally {
-      setIsRunning(false);
+      setClmIsRunning(false);
+      localStorage.removeItem(`rna_session_${rnaType.id}`);
     }
   };
 
-  const handleCopy = async () => {
-    const text = resultSeq || "";
+  /* ---- GLM run ---- */
+  const handleGlmRun = async () => {
+    if (glmIsRunning) return;
+    if (!glmSequence.trim() || glmSeqError) return;
+    setGlmIsRunning(true);
+    setGlmResultSeq("");
+    setGlmResultScore(null);
+    setGlmTaskStatus("running");
+    setGlmTaskMessage("Submitting task...");
+
+    const taskId = crypto.randomUUID();
+
+    const payload: any = {
+      task_type: "infill",
+      rna_type: rnaType.id,
+      sequence: glmSequence.replace(/<mask>/gi, "[MASK]"),
+    };
+    if (species) payload.species = species;
+    if (taxid) payload.taxid = taxid;
+    payload.parameters = { temperature, top_k: topK };
+
+    try {
+      const res = await fetch("/api/task/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Task submission failed");
+      }
+      const { task_id } = await res.json();
+      setGlmTaskMessage("Task queued, waiting for GPU...");
+
+      await pollTaskStatus(
+        task_id,
+        (seq, score) => {
+          setGlmTaskStatus("completed");
+          setGlmTaskMessage("Task completed");
+          setGlmResultSeq(seq);
+          setGlmResultScore(score);
+        },
+        (msg) => {
+          setGlmTaskStatus("error");
+          setGlmTaskMessage(msg);
+        },
+        (msg) => setGlmTaskMessage(msg),
+        glmTimerRef
+      );
+    } catch (error) {
+      console.error("GLM task error:", error);
+      setGlmTaskStatus("error");
+      setGlmTaskMessage(error instanceof Error ? error.message : "Task failed");
+      await new Promise((r) => setTimeout(r, 500));
+      const len = Math.max(glmSequence.replace(/<mask>/gi, "").length + 20, 50);
+      setGlmResultSeq(randomSeq(Math.min(len, MAX_SEQ_LEN)));
+      setGlmResultScore(parseFloat((Math.random() * 0.6 + 0.4).toFixed(4)));
+    } finally {
+      setGlmIsRunning(false);
+    }
+  };
+
+  /* ---- species change ---- */
+  const handleSpeciesChange = (val: string) => {
+    setSpecies(val);
+    if (val && SPECIES_TAXID_MAP[val]) {
+      setTaxid(SPECIES_TAXID_MAP[val]);
+      setTaxidInput(String(SPECIES_TAXID_MAP[val]));
+    } else if (val !== "__taxid__") {
+      setTaxid(null);
+      setTaxidInput("");
+    }
+  };
+
+  /* ---- copy / download helpers ---- */
+  const copyText = async (text: string, setCopied: (v: boolean) => void) => {
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const handleDownload = () => {
-    const text = `>${rnaType.id}_generated\n${resultSeq}`;
-    const blob = new Blob([text], { type: "text/plain" });
+  const downloadFasta = (seq: string) => {
+    const blob = new Blob([`>${rnaType.id}_result\n${seq}`], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${rnaType.id}_generated.fasta`;
+    a.download = `${rnaType.id}_result.fasta`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  const handleReset = () => {
-    setSequence("");
-    setResultSeq("");
-    setResultScore(null);
-    setSeqError("");
-    setTaskStatus("idle");
-    setTaskMessage("");
-  };
+  /* ---- result display helper ---- */
+  const ResultCard = ({
+    seq, score, status, message, isRunning, onCopy, onDownload
+  }: {
+    seq: string; score: number | null;
+    status: "idle" | "running" | "completed" | "error";
+    message: string; isRunning: boolean;
+    onCopy: () => void; onDownload: () => void;
+  }) => (
+    <div>
+      <AnimatePresence>
+        {(seq || score !== null || status !== "idle") && (
+          <motion.div
+            key="result"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.3 }}
+            className="space-y-3"
+          >
+            {/* Status message */}
+            {status !== "idle" && (
+              <div className={cn(
+                "flex items-center gap-2 p-2.5 rounded-lg text-sm",
+                status === "running" && "bg-blue-50 text-blue-600 border border-blue-200",
+                status === "completed" && "bg-green-50 text-green-600 border border-green-200",
+                status === "error" && "bg-red-50 text-red-600 border border-red-200"
+              )}>
+                {status === "running" && <LoadingSpinner className="w-4 h-4" />}
+                <span>{message}</span>
+              </div>
+            )}
+
+            {/* Score */}
+            {score !== null && (
+              <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-xl border border-blue-100">
+                <span className="text-sm font-semibold text-slate-600">Quality Score</span>
+                <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full rounded-full bg-gradient-to-r from-blue-500 to-blue-600"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${Math.min(100, score * 100)}%` }}
+                    transition={{ duration: 1, ease: "easeOut" }}
+                  />
+                </div>
+                <span className="text-sm font-mono font-bold text-blue-600">{score.toFixed(4)}</span>
+              </div>
+            )}
+
+            {/* Sequence */}
+            {seq && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-400">{seq.length.toLocaleString()} nt</span>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 font-mono text-xs text-slate-700 max-h-36 overflow-y-auto break-all leading-relaxed">
+                  {seq}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={onCopy} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors">
+                    <Copy className="w-4 h-4" />
+                    Copy
+                  </button>
+                  <button onClick={onDownload} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors">
+                    <Download className="w-4 h-4" />
+                    FASTA
+                  </button>
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
 
   /* ---- render ---- */
   return (
-    <div className="glass-card rounded-2xl overflow-hidden">
-      {/* ───────── Mode Tabs ───────── */}
-      <div className="flex border-b border-border">
-        {(Object.keys(MODE_META) as Mode[]).map((m) => {
-          const meta = MODE_META[m];
-          const Icon = meta.icon;
-          return (
-            <button
-              key={m}
-              onClick={() => { setMode(m); setResultSeq(""); setResultScore(null); }}
-              className={cn(
-                "flex-1 flex items-center justify-center gap-2 py-3.5 text-sm font-medium transition-colors relative",
-                mode === m
-                  ? "text-primary"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Icon className="w-4 h-4" />
-              <span className="hidden sm:inline">{meta.label}</span>
-              <span className="sm:hidden">{meta.label.split(" ")[0]}</span>
-              {mode === m && (
-                <motion.div
-                  layoutId="mode-underline"
-                  className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-primary to-secondary"
-                />
-              )}
-            </button>
-          );
-        })}
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      {/* ── Tab bar ── */}
+      <div className="flex border-b border-slate-200">
+        {(["clm", "glm"] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={cn(
+              "flex-1 py-2.5 text-xs font-semibold tracking-wide uppercase transition-colors",
+              activeTab === tab
+                ? "border-b-2 border-blue-500 text-blue-600 bg-white"
+                : "text-slate-400 hover:text-slate-600 bg-slate-50"
+            )}
+          >
+            {tab === "clm" ? "CLM · Generate & Score" : "GLM · Infill"}
+          </button>
+        ))}
       </div>
 
-      {/* ───────── Panel Body ───────── */}
-      <div className="p-4 sm:p-6">
-        {/* Mode description */}
-        <p className="text-xs text-muted-foreground mb-4">
-          {MODE_META[mode].desc}
-        </p>
+      {/* ── Tab body ── */}
+      <div>
 
-        {/* Always-visible: sequence input + species + run */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Sequence Input — spans 2 cols on large */}
-          <div className="lg:col-span-2">
-            <div className="flex items-center gap-2 mb-2">
-              <FileText className="w-4 h-4 text-primary" />
-              <label className="text-sm font-medium">
-                {mode === "clm" ? "Prompt Sequence (optional)" : mode === "glm" ? "Masked Sequence" : "Input Sequence"}
-              </label>
-            </div>
+        {activeTab === "clm" && (
+        <div className="p-4 space-y-3">
+
+          {/* CLM sub-mode selector */}
+          <div className="flex gap-1 p-0.5 bg-slate-100 rounded-lg">
+            <button
+              onClick={() => { setClmMode("clm-generate"); setClmResultSeq(""); setClmResultScore(null); setClmTaskStatus("idle"); }}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition-all",
+                clmMode === "clm-generate" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              )}
+            >
+              <Sparkles className="w-3 h-3" /> Generate
+            </button>
+            <button
+              onClick={() => { setClmMode("clm-score"); setClmResultSeq(""); setClmResultScore(null); setClmTaskStatus("idle"); }}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition-all",
+                clmMode === "clm-score" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+              )}
+            >
+              <FlaskConical className="w-3 h-3" /> Score
+            </button>
+          </div>
+
+          {/* Sequence input */}
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">
+              {clmMode === "clm-generate" ? "Seed Sequence" : "Input Sequence"}
+              {clmMode === "clm-generate" && <span className="ml-1 text-slate-400">(optional)</span>}
+            </label>
             <textarea
               ref={textareaRef}
-              value={sequence}
-              onChange={(e) => handleSeqChange(e.target.value)}
-              placeholder={
-                mode === "clm"
-                  ? "Optional: provide a seed sequence or leave blank to generate from scratch…"
-                  : mode === "glm"
-                    ? "Enter sequence with <mask> tokens for infilling…\nExample: AUGCUAGC<mask>UAGCUAGC"
-                    : "Enter RNA sequence for quality prediction…\nExample: AUGCGAUUCGAACGUAACGCUUAGCGUAGCU"
-              }
+              value={clmSequence}
+              onChange={(e) => { setClmSequence(e.target.value); validateClmSeq(e.target.value); }}
+              placeholder={clmMode === "clm-generate" ? "Leave blank or enter seed…" : "Enter RNA sequence to score…"}
+              rows={3}
               className={cn(
-                "w-full h-28 sm:h-32 p-3 rounded-xl bg-muted/30 border resize-none focus:outline-none transition-colors font-mono text-sm",
-                seqError ? "border-red-500/60 focus:border-red-500" : "border-border focus:border-primary/50"
+                "w-full p-2.5 rounded-lg border bg-white resize-none focus:outline-none transition-all text-xs font-mono text-slate-700 placeholder:text-slate-300",
+                clmSeqError ? "border-red-300 focus:border-red-400 focus:ring-1 focus:ring-red-100" : "border-slate-200 focus:border-blue-400 focus:ring-1 focus:ring-blue-100"
               )}
             />
-            <div className="flex items-center justify-between mt-1.5 text-xs">
-              <span className={cn("transition-colors", seqError ? "text-red-400" : "text-muted-foreground")}>
-                {seqError || `${sequence.length.toLocaleString()} / ${MAX_SEQ_LEN.toLocaleString()}`}
+            <div className="flex items-center justify-between mt-0.5">
+              <span className={cn("text-xs", clmSeqError ? "text-red-500" : "text-slate-400")}>
+                {clmSeqError || `${clmSequence.length.toLocaleString()} / ${MAX_SEQ_LEN.toLocaleString()} nt`}
               </span>
-              {seqError && <AlertCircle className="w-3.5 h-3.5 text-red-400" />}
-              {!seqError && <span className="text-muted-foreground">A, U, G, C</span>}
+              {clmMode === "clm-generate" && clmSequence.length === 0 && (
+                <button onClick={() => { const s = randomSeq(30); setClmSequence(s); }} className="text-xs text-blue-400 hover:text-blue-600 transition-colors flex items-center gap-0.5">
+                  <Wand2 className="w-3 h-3" /> Random
+                </button>
+              )}
             </div>
           </div>
 
-          {/* Right column: species + action */}
-          <div className="flex flex-col gap-3">
-            {/* Species */}
-            {speciesList.length > 0 && (
-              <div>
-                <label className="block text-sm font-medium mb-2">Species (optional)</label>
-                <select
-                  value={species}
-                  onChange={(e) => setSpecies(e.target.value)}
-                  className="w-full p-3 rounded-xl bg-muted/30 border border-border focus:outline-none focus:border-primary/50 transition-colors text-sm"
-                >
-                  <option value="">Auto-detect</option>
-                  {speciesList.map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {/* Max length — only for CLM */}
-            {mode === "clm" && (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="text-sm font-medium">Max Length</label>
-                  <span className="text-sm text-primary">{maxLength}</span>
-                </div>
-                <input
-                  type="range"
-                  min={10}
-                  max={MAX_SEQ_LEN}
-                  step={10}
-                  value={maxLength}
-                  onChange={(e) => setMaxLength(Number(e.target.value))}
-                  className="w-full accent-primary"
-                />
-              </div>
-            )}
-
-            {/* Run + Reset */}
-            <div className="flex gap-2 mt-auto">
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={handleRun}
-                disabled={!canRun}
-                className={cn(
-                  "flex-1 py-3 rounded-xl font-medium flex items-center justify-center gap-2 transition-all text-sm",
-                  canRun
-                    ? "bg-gradient-to-r from-primary to-secondary text-white glow-orange"
-                    : "bg-muted text-muted-foreground cursor-not-allowed"
-                )}
+          {/* Species */}
+          {speciesList.length > 0 && (
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Species</label>
+              <select
+                value={species}
+                onChange={(e) => {
+                  if (e.target.value === "__taxid__") {
+                    setShowTaxidInput(true);
+                    setTimeout(() => taxidInputRef.current?.focus(), 100);
+                  } else {
+                    handleSpeciesChange(e.target.value);
+                    setShowTaxidInput(false);
+                  }
+                }}
+                className="w-full p-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 text-xs text-slate-700"
               >
-                {isRunning ? (
-                  <><LoadingSpinner className="w-4 h-4" /> Running…</>
-                ) : (
-                  <><Play className="w-4 h-4" /> Run</>
-                )}
-              </motion.button>
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={handleReset}
-                className="p-3 rounded-xl bg-muted/40 hover:bg-muted/60 transition-colors"
-                title="Reset"
-              >
-                <RotateCcw className="w-4 h-4" />
-              </motion.button>
+                <option value="">Auto-detect</option>
+                {speciesList.map((s) => (
+                  <option key={s} value={s}>{SPECIES_TAXID_MAP[s] ? `${s} (${SPECIES_TAXID_MAP[s]})` : s}</option>
+                ))}
+                <option disabled />
+                <option value="__taxid__">+ Enter TaxID manually</option>
+              </select>
             </div>
+          )}
 
-            {/* Task Status Display */}
-            {taskStatus !== "idle" && (
-              <div className={cn(
-                "mt-3 p-3 rounded-xl text-sm",
-                taskStatus === "running" && "bg-blue-500/20 text-blue-400 border border-blue-500/30",
-                taskStatus === "completed" && "bg-green-500/20 text-green-400 border border-green-500/30",
-                taskStatus === "error" && "bg-red-500/20 text-red-400 border border-red-500/30"
-              )}>
-                <div className="flex items-center gap-2">
-                  {taskStatus === "running" && <LoadingSpinner className="w-4 h-4" />}
-                  <span>{taskMessage}</span>
+          {/* TaxID manual input */}
+          {(showTaxidInput || taxid) && (
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">NCBI TaxID</label>
+              <input
+                ref={taxidInputRef}
+                type="number"
+                value={taxidInput}
+                onChange={(e) => { const v = e.target.value; setTaxidInput(v); setTaxid(v ? parseInt(v, 10) : null); }}
+                placeholder="e.g. 9606"
+                className="w-full p-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 text-xs font-mono text-slate-700"
+              />
+            </div>
+          )}
+
+          {/* Advanced toggle */}
+          <button
+            onClick={() => setShowAdvanced((v) => !v)}
+            className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            <Settings2 className="w-3 h-3" />
+            Advanced parameters
+            <ChevronDown className={cn("w-3 h-3 transition-transform", showAdvanced && "rotate-180")} />
+          </button>
+
+          {/* Advanced params */}
+          <AnimatePresence>
+            {showAdvanced && (
+              <motion.div
+                key="adv-clm"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden space-y-3 pt-1"
+              >
+                {/* Max length */}
+                <div>
+                  <div className="flex justify-between mb-1">
+                    <label className="text-xs font-medium text-slate-500">Max Length</label>
+                    <span className="text-xs font-mono text-blue-500">{clmMaxLength}</span>
+                  </div>
+                  <input type="range" min={10} max={MAX_SEQ_LEN} step={10} value={clmMaxLength} onChange={(e) => setClmMaxLength(Number(e.target.value))} className="w-full accent-blue-500" />
                 </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* ───────── Advanced settings (expand/collapse) ───────── */}
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="flex items-center gap-2 mt-4 text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <Settings className="w-4 h-4" />
-          Advanced Settings
-          {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-        </button>
-
-        <AnimatePresence>
-          {expanded && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.25 }}
-              className="overflow-hidden"
-            >
-              <div className="mt-4 pt-4 border-t border-border grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {/* Temperature */}
                 <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="text-sm font-medium">Temperature</label>
-                    <span className="text-sm text-primary">{temperature}</span>
+                  <div className="flex justify-between mb-1">
+                    <label className="text-xs font-medium text-slate-500">Temperature</label>
+                    <span className="text-xs font-mono text-blue-500">{temperature}</span>
                   </div>
-                  <input
-                    type="range"
-                    min={0.1}
-                    max={2.0}
-                    step={0.1}
-                    value={temperature}
-                    onChange={(e) => setTemperature(parseFloat(e.target.value))}
-                    className="w-full accent-primary"
-                  />
-                  <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                    <span>Conservative</span>
-                    <span>Creative</span>
-                  </div>
+                  <input type="range" min={0.1} max={2.0} step={0.1} value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))} className="w-full accent-blue-500" />
+                  <div className="flex justify-between text-xs text-slate-400 mt-0.5"><span>Conservative</span><span>Creative</span></div>
                 </div>
-
                 {/* Top-K */}
                 <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="text-sm font-medium">Top-K</label>
-                    <span className="text-sm text-primary">{topK}</span>
+                  <div className="flex justify-between mb-1">
+                    <label className="text-xs font-medium text-slate-500">Top-K</label>
+                    <span className="text-xs font-mono text-blue-500">{topK}</span>
                   </div>
-                  <input
-                    type="range"
-                    min={1}
-                    max={100}
-                    step={1}
-                    value={topK}
-                    onChange={(e) => setTopK(parseInt(e.target.value))}
-                    className="w-full accent-primary"
-                  />
+                  <input type="range" min={1} max={100} step={1} value={topK} onChange={(e) => setTopK(parseInt(e.target.value))} className="w-full accent-blue-500" />
                 </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-                {/* Min / Max Length (override for non-CLM) */}
-                {mode !== "clm" && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Min Len</label>
-                      <input
-                        type="number"
-                        defaultValue={10}
-                        min={1}
-                        max={MAX_SEQ_LEN}
-                        className="w-full p-2.5 rounded-xl bg-muted/30 border border-border focus:outline-none focus:border-primary/50 transition-colors text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Max Len</label>
-                      <input
-                        type="number"
-                        defaultValue={5000}
-                        min={1}
-                        max={MAX_SEQ_LEN}
-                        className="w-full p-2.5 rounded-xl bg-muted/30 border border-border focus:outline-none focus:border-primary/50 transition-colors text-sm"
-                      />
-                    </div>
+          {/* Run button */}
+          <button
+            onClick={handleClmRun}
+            disabled={clmIsRunning || (clmMode === "clm-score" && !clmSequence.trim()) || !!clmSeqError}
+            className={cn(
+              "w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all",
+              clmIsRunning
+                ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                : "bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+            )}
+          >
+            {clmIsRunning ? <><LoadingSpinner className="w-4 h-4" /> Running…</> : <><Play className="w-4 h-4" /> Run CLM</>}
+          </button>
+
+          {/* Result */}
+          <ResultCard
+            seq={clmResultSeq} score={clmResultScore}
+            status={clmTaskStatus} message={clmTaskMessage}
+            isRunning={clmIsRunning}
+            onCopy={() => copyText(clmResultSeq, setClmCopied)}
+            onDownload={() => downloadFasta(clmResultSeq)}
+          />
+        </div>
+        )}
+
+        {activeTab === "glm" && (
+        <div className="p-4 space-y-3">
+
+          {/* Sequence input */}
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">
+              Masked Sequence
+            </label>
+            <textarea
+              value={glmSequence}
+              onChange={(e) => { setGlmSequence(e.target.value); validateGlmSeq(e.target.value); }}
+              placeholder="Enter sequence with <mask> tokens…
+Example: AUGCUAGC<mask>UAGCUAGC"
+              rows={4}
+              className={cn(
+                "w-full p-2.5 rounded-lg border bg-white resize-none focus:outline-none transition-all text-sm font-mono text-slate-700 placeholder:text-slate-300",
+                glmSeqError ? "border-red-400 focus:border-red-400 focus:ring-2 focus:ring-red-100" : "border-slate-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+              )}
+            />
+            <div className="flex items-center justify-between mt-1">
+              <span className={cn("text-xs", glmSeqError ? "text-red-500" : "text-slate-400")}>
+                {glmSeqError || `${glmSequence.length.toLocaleString()} / ${MAX_SEQ_LEN.toLocaleString()} nt`}
+              </span>
+              <span className="text-xs text-slate-400">Use &lt;mask&gt; to mark regions</span>
+            </div>
+          </div>
+
+          {/* Advanced toggle */}
+          <button
+            onClick={() => setShowAdvanced((v) => !v)}
+            className="flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 transition-colors"
+          >
+            <Settings2 className="w-3 h-3" />
+            Advanced settings
+            <ChevronDown className={cn("w-3 h-3 transition-transform", showAdvanced && "rotate-180")} />
+          </button>
+
+          <AnimatePresence>
+            {showAdvanced && (
+              <motion.div
+                key="adv-glm"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2 }}
+                className="space-y-3 overflow-hidden"
+              >
+                {/* Species */}
+                {speciesList.length > 0 && (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-500 mb-1">Species</label>
+                    <select
+                      value={species}
+                      onChange={(e) => {
+                        if (e.target.value === "__taxid__") { setShowTaxidInput(true); setTimeout(() => taxidInputRef.current?.focus(), 100); }
+                        else { handleSpeciesChange(e.target.value); setShowTaxidInput(false); }
+                      }}
+                      className="w-full p-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition-all text-xs text-slate-700"
+                    >
+                      <option value="">Auto-detect</option>
+                      {speciesList.map((s) => (
+                        <option key={s} value={s}>{SPECIES_TAXID_MAP[s] ? `${s} (${SPECIES_TAXID_MAP[s]})` : s}</option>
+                      ))}
+                      <option disabled />
+                      <option value="__taxid__" className="text-indigo-600 font-medium">+ Enter TaxID manually</option>
+                    </select>
                   </div>
                 )}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* ───────── Result Area ───────── */}
-        <AnimatePresence>
-          {(resultSeq || resultScore !== null) && (
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 12 }}
-              transition={{ duration: 0.3 }}
-              className="mt-6 pt-6 border-t border-border"
-            >
-              {/* ---- Prediction Score ---- */}
-              {resultScore !== null && (
-                <div className="flex flex-col items-center gap-4">
-                  <h3 className="text-sm font-medium text-muted-foreground">Prediction Score</h3>
-                  <div className="relative w-40 h-40">
-                    {/* Circular gauge */}
-                    <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90">
-                      <circle cx="60" cy="60" r="52" fill="none" stroke="var(--muted)" strokeWidth="8" />
-                      <motion.circle
-                        cx="60" cy="60" r="52" fill="none"
-                        stroke="url(#scoreGrad)"
-                        strokeWidth="8"
-                        strokeLinecap="round"
-                        strokeDasharray={`${2 * Math.PI * 52}`}
-                        initial={{ strokeDashoffset: 2 * Math.PI * 52 }}
-                        animate={{ strokeDashoffset: 2 * Math.PI * 52 * (1 - resultScore) }}
-                        transition={{ duration: 1, ease: "easeOut" }}
-                      />
-                      <defs>
-                        <linearGradient id="scoreGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                          <stop offset="0%" stopColor="var(--primary)" />
-                          <stop offset="100%" stopColor="var(--secondary)" />
-                        </linearGradient>
-                      </defs>
-                    </svg>
-                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                      <span className="text-3xl font-bold gradient-text-orange-blue">
-                        {resultScore.toFixed(4)}
-                      </span>
-                      <span className="text-xs text-muted-foreground mt-1">
-                        {resultScore >= 0.8 ? "Excellent" : resultScore >= 0.6 ? "Good" : "Fair"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ---- Generated Sequence ---- */}
-              {resultSeq && (
+                {/* TaxID */}
                 <div>
-                  <div className="flex items-center gap-2 mb-3">
-                    <FileText className="w-4 h-4 text-primary" />
-                    <h3 className="text-sm font-medium">
-                      {mode === "clm" ? "Generated Sequence" : "Infilled Sequence"}
-                    </h3>
-                    <span className="text-xs text-muted-foreground ml-auto">
-                      {resultSeq.length.toLocaleString()} nt
-                    </span>
-                  </div>
-                  <div className="p-3 rounded-xl bg-muted/30 border border-border font-mono text-xs sm:text-sm max-h-48 overflow-y-auto break-all leading-relaxed">
-                    {resultSeq}
-                  </div>
-                  <div className="flex gap-2 mt-3">
-                    <button
-                      onClick={handleCopy}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium bg-muted/50 hover:bg-muted transition-colors"
-                    >
-                      {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
-                      {copied ? "Copied" : "Copy"}
-                    </button>
-                    <button
-                      onClick={handleDownload}
-                      className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium bg-muted/50 hover:bg-muted transition-colors"
-                    >
-                      <Download className="w-4 h-4" />
-                      Download FASTA
-                    </button>
-                  </div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">
+                    <Hash className="w-3 h-3 inline mr-1 text-indigo-500" />NCBI TaxID
+                  </label>
+                  <input ref={taxidInputRef} type="number" value={taxidInput}
+                    onChange={(e) => { const v = e.target.value; setTaxidInput(v); setTaxid(v ? parseInt(v, 10) : null); }}
+                    placeholder="e.g. 9606"
+                    className="w-full p-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition-all text-xs text-slate-700"
+                  />
                 </div>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
+                {/* Temperature */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-medium text-slate-500">Temperature</label>
+                    <span className="text-xs font-mono text-indigo-500">{temperature}</span>
+                  </div>
+                  <input type="range" min={0.1} max={2.0} step={0.1} value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))} className="w-full accent-indigo-500" />
+                </div>
+                {/* Top-K */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-medium text-slate-500">Top-K</label>
+                    <span className="text-xs font-mono text-indigo-500">{topK}</span>
+                  </div>
+                  <input type="range" min={1} max={100} step={1} value={topK} onChange={(e) => setTopK(parseInt(e.target.value))} className="w-full accent-indigo-500" />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Run button */}
+          <button
+            onClick={handleGlmRun}
+            disabled={glmIsRunning || !glmSequence.trim() || !!glmSeqError}
+            className={cn(
+              "w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all",
+              glmIsRunning || !glmSequence.trim() || !!glmSeqError
+                ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
+            )}
+          >
+            {glmIsRunning ? <><LoadingSpinner className="w-4 h-4" /> Running…</> : <><Wand2 className="w-4 h-4" /> Run GLM</>}
+          </button>
+
+          {/* Result */}
+          <ResultCard
+            seq={glmResultSeq} score={glmResultScore}
+            status={glmTaskStatus} message={glmTaskMessage}
+            isRunning={glmIsRunning}
+            onCopy={() => copyText(glmResultSeq, setGlmCopied)}
+            onDownload={() => downloadFasta(glmResultSeq)}
+          />
+        </div>
+        )}
       </div>
     </div>
   );

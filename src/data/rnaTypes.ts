@@ -8,6 +8,7 @@ export interface RNAType {
   species?: string[];
   examples?: RNAExample[];
   achievements?: RNAAchievement[];
+  visualizations?: RNAVisualization[];
 }
 
 export interface RNAExample {
@@ -26,11 +27,44 @@ export interface RNAAchievement {
   paper?: string;
 }
 
+export interface RNAVisualization {
+  title: string;
+  description: string;
+  imagePath: string;
+  imageAlt: string;
+}
+
 /* ---------- Per-RNA species lists ---------- */
 const SPECIES_HUMAN_MODEL = ['Homo sapiens', 'Mus musculus', 'Rattus norvegicus', 'Danio rerio', 'Drosophila melanogaster', 'Caenorhabditis elegans'];
 const SPECIES_BROAD = ['Homo sapiens', 'Mus musculus', 'Arabidopsis thaliana', 'Saccharomyces cerevisiae', 'Escherichia coli'];
 const SPECIES_BACTERIAL = ['Escherichia coli', 'Bacillus subtilis', 'Pseudomonas aeruginosa', 'Staphylococcus aureus', 'Salmonella enterica'];
 const SPECIES_VIRAL = ['SARS-CoV-2', 'Influenza A', 'HIV-1', 'Hepatitis C', 'Ebola virus', 'Zika virus'];
+
+/* ---------- Species to NCBI TaxID mapping ---------- */
+export const SPECIES_TAXID_MAP: Record<string, number> = {
+  // Eukaryotes
+  'Homo sapiens': 9606,
+  'Mus musculus': 10090,
+  'Rattus norvegicus': 10116,
+  'Danio rerio': 7955,
+  'Drosophila melanogaster': 7227,
+  'Caenorhabditis elegans': 6239,
+  'Arabidopsis thaliana': 3702,
+  'Saccharomyces cerevisiae': 4932,
+  // Bacteria
+  'Escherichia coli': 562,
+  'Bacillus subtilis': 224308,
+  'Pseudomonas aeruginosa': 287,
+  'Staphylococcus aureus': 1280,
+  'Salmonella enterica': 28901,
+  // Viruses
+  'SARS-CoV-2': 2697049,
+  'Influenza A': 11320,
+  'HIV-1': 11676,
+  'Hepatitis C': 11103,
+  'Ebola virus': 186539,
+  'Zika virus': 64320,
+};
 
 /* ---------- Mock example sequences (short fragments) ---------- */
 function mockSeq(len: number): string {
