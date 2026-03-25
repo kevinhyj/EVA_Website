@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { ArrowLeft, AlertCircle, CheckCircle } from "lucide-react";
 import Link from "next/link";
 import type { RNAType } from "@/data/rnaTypes";
 import { ControlPanel } from "@/components/control-panel";
-import { ExamplesShowcase } from "@/components/examples-showcase";
+import { VisualizationsShowcase } from "@/components/visualizations-showcase";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -149,61 +149,50 @@ export default function RNADesignPage({ rnaType }: Props) {
     await poll();
   };
 
-  const handleTryExample = useCallback((seq: string, species: string) => {
-    if (pollTimerRef.current) {
-      clearTimeout(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
-    setPrefillSequence(seq);
-    setPrefillSpecies(species);
-    setPrefillSettings(null);
-    setRestoreStatus(null);
-    document.getElementById("control-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
-
   return (
-    <div className="min-h-screen theme-light bg-white">
-      <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
+    <div className="min-h-screen bg-slate-50">
+      <div className="container mx-auto px-4 sm:px-6 py-8 sm:py-10 max-w-6xl">
+
         {/* ───────── Header ───────── */}
         <motion.div
-          initial={{ opacity: 0, y: 20 }}
+          initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="mb-6 sm:mb-8"
+          transition={{ duration: 0.4 }}
+          className="mb-8"
         >
           {/* Back link */}
           <Link
             href="/"
-            className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4"
+            className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-blue-500 transition-colors mb-5 font-medium tracking-wide"
           >
-            <ArrowLeft className="w-4 h-4" />
-            Back to Home
+            <ArrowLeft className="w-3.5 h-3.5" />
+            Back
           </Link>
 
-          <div className="flex flex-wrap items-center gap-3 sm:gap-4">
-            {/* Color dot */}
-            <span
-              className="w-3 h-3 rounded-full shrink-0"
-              style={{ backgroundColor: rnaType.col, boxShadow: `0 0 12px ${rnaType.col}60` }}
+          {/* Title row */}
+          <div className="flex items-center gap-3 mb-3">
+            {/* Colored indicator bar */}
+            <div
+              className="w-1 h-8 rounded-full"
+              style={{ backgroundColor: rnaType.col }}
             />
-            {/* Title */}
-            <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold">
-              <span className="gradient-text-orange-blue">{rnaType.name}</span>
+            <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 tracking-tight">
+              {rnaType.name}
             </h1>
-            {/* Tag badge */}
             <span
-              className="text-xs font-medium px-3 py-1 rounded-full border shrink-0"
+              className="text-xs font-medium px-2.5 py-0.5 rounded-full border"
               style={{
-                borderColor: `${rnaType.col}50`,
+                borderColor: `${rnaType.col}40`,
                 color: rnaType.col,
-                background: `${rnaType.col}15`,
+                background: `${rnaType.col}10`,
               }}
             >
               {rnaType.tag}
             </span>
           </div>
 
-          <p className="mt-2 text-sm sm:text-base text-muted-foreground max-w-2xl">
+          {/* Description */}
+          <p className="text-sm text-slate-500 max-w-2xl leading-relaxed pl-4">
             {rnaType.desc}
           </p>
         </motion.div>
@@ -218,10 +207,10 @@ export default function RNADesignPage({ rnaType }: Props) {
           {/* Restore status messages */}
           {restoreStatus && (
             <div className={cn(
-              "mb-4 p-3 rounded-xl text-sm flex items-center gap-2",
-              restoreStatus.type === "loading" && "bg-blue-50 text-blue-600 border border-blue-200",
-              restoreStatus.type === "success" && "bg-green-50 text-green-600 border border-green-200",
-              restoreStatus.type === "error" && "bg-red-50 text-red-600 border border-red-200"
+              "mb-4 p-3 rounded-xl text-sm flex items-center gap-2.5",
+              restoreStatus.type === "loading" && "bg-blue-50 text-blue-600 border border-blue-100",
+              restoreStatus.type === "success" && "bg-emerald-50 text-emerald-600 border border-emerald-100",
+              restoreStatus.type === "error" && "bg-red-50 text-red-600 border border-red-100"
             )}>
               {restoreStatus.type === "loading" && <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />}
               {restoreStatus.type === "success" && <CheckCircle className="w-4 h-4" />}
@@ -239,14 +228,20 @@ export default function RNADesignPage({ rnaType }: Props) {
           />
         </motion.div>
 
-        {/* ───────── Examples & Achievements ───────── */}
+        {/* ───────── Experiment Visualizations ───────── */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.2 }}
-          className="mt-8 sm:mt-10"
+          className="mt-10"
         >
-          <ExamplesShowcase rnaType={rnaType} onTryExample={handleTryExample} />
+          {/* Section divider */}
+          <div className="flex items-center gap-3 mb-5">
+            <div className="flex-1 h-px bg-blue-200" />
+            <span className="text-xs font-semibold text-blue-400 tracking-widest uppercase">Experiment Visualization</span>
+            <div className="flex-1 h-px bg-blue-200" />
+          </div>
+          <VisualizationsShowcase rnaType={rnaType} />
         </motion.div>
       </div>
     </div>
