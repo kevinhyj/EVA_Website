@@ -99,22 +99,28 @@ export function Navbar() {
     }
   }, []);
 
+  const isDesignPage = pathname.startsWith("/design") || pathname.startsWith("/rna");
+
   useMotionValueEvent(scrollY, "change", (latest) => {
     setIsScrolled(latest > 50);
     // Switch to light theme when scrolled past ~80% of hero (250vh * 0.8)
     setIsLightSection(latest > window.innerHeight * 2);
   });
 
+  // On design/rna pages, always show as light + scrolled
+  const effectiveIsLight = isDesignPage || isLightSection;
+  const effectiveIsScrolled = isDesignPage || isScrolled;
+
   return (
     <motion.header
       className={cn(
         "fixed top-0 left-0 right-0 z-40 transition-colors duration-300",
-        isScrolled ? "glass-nav py-3" : "py-5",
-        isLightSection && isScrolled ? "theme-light" : ""
+        effectiveIsScrolled ? "glass-nav py-3" : "py-5",
+        effectiveIsLight ? "theme-light" : ""
       )}
       style={{
-        background: !isScrolled ? 'transparent' : undefined,
-        borderBottom: !isScrolled ? 'none' : undefined,
+        background: !effectiveIsScrolled ? 'transparent' : undefined,
+        borderBottom: !effectiveIsScrolled ? 'none' : undefined,
       }}
       initial={{ y: -100 }}
       animate={{ y: 0 }}
@@ -134,7 +140,7 @@ export function Navbar() {
               width={160}
               height={40}
               className="h-10 w-auto"
-              style={isLightSection && isScrolled ? { filter: 'brightness(0.3)' } : undefined}
+              style={effectiveIsLight ? { filter: 'brightness(0.3)' } : undefined}
               priority
             />
           </motion.div>
@@ -151,7 +157,7 @@ export function Navbar() {
                   onClick={handleTeamClick}
                   className={cn(
                     "text-sm font-medium transition-colors duration-200 relative group cursor-pointer",
-                    isLightSection && isScrolled
+                    effectiveIsLight
                       ? "text-slate-600 hover:text-slate-900"
                       : "text-muted-foreground hover:text-foreground"
                   )}
@@ -169,7 +175,7 @@ export function Navbar() {
                   onClick={handleDesignClick}
                   className={cn(
                     "text-sm font-medium transition-colors duration-200 relative group cursor-pointer",
-                    isLightSection && isScrolled
+                    effectiveIsLight
                       ? "text-slate-600 hover:text-slate-900"
                       : "text-muted-foreground hover:text-foreground"
                   )}
@@ -189,7 +195,7 @@ export function Navbar() {
                     "text-sm font-medium transition-colors duration-200 relative group cursor-pointer",
                     pathname === link.href
                       ? "text-primary"
-                      : isLightSection && isScrolled
+                      : effectiveIsLight
                         ? "text-slate-600 hover:text-slate-900"
                         : "text-muted-foreground hover:text-foreground"
                   )}
@@ -207,7 +213,7 @@ export function Navbar() {
                   "text-sm font-medium transition-colors duration-200 relative group",
                   pathname === link.href
                     ? "text-primary"
-                    : isLightSection && isScrolled
+                    : effectiveIsLight
                       ? "text-slate-600 hover:text-slate-900"
                       : "text-muted-foreground hover:text-foreground"
                 )}
@@ -235,7 +241,7 @@ export function Navbar() {
           >
             <Github className={cn(
               "w-5 h-5 transition-colors",
-              isLightSection && isScrolled ? "text-slate-500 hover:text-slate-800" : "text-muted-foreground hover:text-foreground"
+              effectiveIsLight ? "text-slate-500 hover:text-slate-800" : "text-muted-foreground hover:text-foreground"
             )} />
           </Link>
           */}
@@ -259,9 +265,9 @@ export function Navbar() {
           onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
         >
           {isMobileMenuOpen ? (
-            <X className={cn("w-6 h-6", isLightSection && isScrolled ? "text-slate-700" : "")} />
+            <X className={cn("w-6 h-6", effectiveIsLight ? "text-slate-700" : "")} />
           ) : (
-            <Menu className={cn("w-6 h-6", isLightSection && isScrolled ? "text-slate-700" : "")} />
+            <Menu className={cn("w-6 h-6", effectiveIsLight ? "text-slate-700" : "")} />
           )}
         </button>
       </div>
@@ -274,7 +280,7 @@ export function Navbar() {
           exit={{ opacity: 0, y: -20 }}
           className={cn(
             "md:hidden absolute top-full left-0 right-0 glass-nav border-t border-border",
-            isLightSection ? "theme-light" : ""
+            effectiveIsLight ? "theme-light" : ""
           )}
         >
           <nav className="flex flex-col py-4">

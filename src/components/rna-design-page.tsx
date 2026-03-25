@@ -17,6 +17,7 @@ interface SavedSession {
   id: string;
   sequence: string;
   species: string;
+  taxid?: number;
   temperature: number;
   topK: number;
   maxLength: number;
@@ -36,7 +37,6 @@ interface SavedResult {
 }
 
 export default function RNADesignPage({ rnaType }: Props) {
-  /* Allow examples to fill the control-panel sequence input */
   const [prefillSequence, setPrefillSequence] = useState("");
   const [prefillSpecies, setPrefillSpecies] = useState("");
   const [prefillSettings, setPrefillSettings] = useState<{
@@ -45,25 +45,34 @@ export default function RNADesignPage({ rnaType }: Props) {
     topK?: number;
     maxLength?: number;
     mode?: string;
+    taxid?: number;
   } | null>(null);
   const [prefillResult, setPrefillResult] = useState<SavedResult | null>(null);
 
-  // 恢复结果时的状态消息
   const [restoreStatus, setRestoreStatus] = useState<{
     type: "loading" | "success" | "error";
     message: string;
   } | null>(null);
 
-  // 存储轮询定时器 ID
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isMountedRef = useRef(true);
 
-  // 检查 localStorage 恢复保存的参数
+  /* ---- component lifecycle ---- */
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      if (pollTimerRef.current) {
+        clearTimeout(pollTimerRef.current);
+      }
+    };
+  }, []);
+
+  /* ---- restore from localStorage ---- */
   useEffect(() => {
     const savedSession = localStorage.getItem(`rna_session_${rnaType.id}`);
     if (savedSession) {
       try {
         const session: SavedSession = JSON.parse(savedSession);
-        // 检查是否在 24 小时内保存的
         const isRecent = Date.now() - session.timestamp < 24 * 60 * 60 * 1000;
         if (isRecent && session.sequence) {
           setPrefillSequence(session.sequence);
@@ -74,9 +83,8 @@ export default function RNADesignPage({ rnaType }: Props) {
             topK: session.topK,
             maxLength: session.maxLength,
             mode: session.mode,
+            taxid: session.taxid,
           });
-
-          // 尝试读取保存的结果
           fetchResult(session.id, session.mode, rnaType.id);
         }
       } catch (e) {
@@ -85,78 +93,76 @@ export default function RNADesignPage({ rnaType }: Props) {
     }
   }, [rnaType.id]);
 
-  // 组件卸载时清除轮询定时器
-  useEffect(() => {
-    return () => {
-      if (pollTimerRef.current) {
-        clearTimeout(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
-    };
-  }, []);
-
-  // 读取保存的结果
+  /* ---- fetch result via task status API ---- */
   const fetchResult = async (taskId: string, mode: string, rnaTypeId: string) => {
-    // 清除之前的轮询定时器
     if (pollTimerRef.current) {
       clearTimeout(pollTimerRef.current);
       pollTimerRef.current = null;
     }
+
+    if (!isMountedRef.current) return;
 
     setRestoreStatus({ type: "loading", message: "Loading previous result..." });
 
-    try {
-      const response = await fetch(`/api/result?taskId=${taskId}&mode=${mode}`);
-      if (response.ok) {
+    const poll = async () => {
+      if (!isMountedRef.current) return;
+
+      try {
+        const response = await fetch(`/api/task/status/${taskId}`);
+        if (!response.ok) {
+          setRestoreStatus({ type: "error", message: "Failed to load result" });
+          return;
+        }
+
         const data = await response.json();
         const status = data.status;
 
+        if (!isMountedRef.current) return;
+
         if (status === "completed") {
-          // 任务完成，显示结果
-          setPrefillResult(data);
+          const result = data.result || {};
+          setPrefillResult({
+            sequence: result.sequence || "",
+            score: result.score ?? result.perplexity,
+            ...result,
+          });
           setRestoreStatus({ type: "success", message: "Previous result restored" });
-          // 清理 localStorage 和输出目录
           localStorage.removeItem(`rna_session_${rnaTypeId}`);
-          // 删除输出目录
-          fetch(`/api/result?taskId=${taskId}`, { method: "DELETE" });
-          // 3秒后清除状态消息
-          setTimeout(() => setRestoreStatus(null), 3000);
-        } else if (status === "running") {
-          // 任务仍在运行，设置定时器轮询
+          fetch(`/api/task/status/${taskId}`, { method: "DELETE" });
+          setTimeout(() => {
+            if (isMountedRef.current) setRestoreStatus(null);
+          }, 3000);
+        } else if (status === "processing" || status === "pending") {
           setRestoreStatus({ type: "loading", message: "Previous task is still running..." });
-          pollTimerRef.current = setTimeout(() => fetchResult(taskId, mode, rnaTypeId), 2000);
+          pollTimerRef.current = setTimeout(poll, 2000);
         } else if (status === "failed") {
-          // 任务失败
-          setRestoreStatus({ type: "error", message: data.message || "Task failed" });
-          // 清理 localStorage 和输出目录
+          setRestoreStatus({ type: "error", message: data.error || "Task failed" });
           localStorage.removeItem(`rna_session_${rnaTypeId}`);
-          // 删除输出目录
-          fetch(`/api/result?taskId=${taskId}`, { method: "DELETE" });
+          fetch(`/api/task/status/${taskId}`, { method: "DELETE" });
         }
-        // pending 或 not_found 不做处理
+      } catch {
+        if (!isMountedRef.current) return;
+        setRestoreStatus({ type: "error", message: "Failed to load result" });
       }
-    } catch (e) {
-      setRestoreStatus({ type: "error", message: "Failed to load result" });
-    }
+    };
+
+    await poll();
   };
 
   const handleTryExample = useCallback((seq: string, species: string) => {
-    // 清除轮询定时器
     if (pollTimerRef.current) {
       clearTimeout(pollTimerRef.current);
       pollTimerRef.current = null;
     }
-
     setPrefillSequence(seq);
     setPrefillSpecies(species);
-    setPrefillSettings(null); // 清除保存的设置
-    setRestoreStatus(null); // 清除状态消息
-    // scroll to control panel
+    setPrefillSettings(null);
+    setRestoreStatus(null);
     document.getElementById("control-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, []);
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen theme-light bg-white">
       <div className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {/* ───────── Header ───────── */}
         <motion.div
@@ -209,15 +215,15 @@ export default function RNADesignPage({ rnaType }: Props) {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.1 }}
         >
-          {/* 恢复结果状态消息 */}
+          {/* Restore status messages */}
           {restoreStatus && (
             <div className={cn(
               "mb-4 p-3 rounded-xl text-sm flex items-center gap-2",
-              restoreStatus.type === "loading" && "bg-blue-500/20 text-blue-400 border border-blue-500/30",
-              restoreStatus.type === "success" && "bg-green-500/20 text-green-400 border border-green-500/30",
-              restoreStatus.type === "error" && "bg-red-500/20 text-red-400 border border-red-500/30"
+              restoreStatus.type === "loading" && "bg-blue-50 text-blue-600 border border-blue-200",
+              restoreStatus.type === "success" && "bg-green-50 text-green-600 border border-green-200",
+              restoreStatus.type === "error" && "bg-red-50 text-red-600 border border-red-200"
             )}>
-              {restoreStatus.type === "loading" && <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />}
+              {restoreStatus.type === "loading" && <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />}
               {restoreStatus.type === "success" && <CheckCircle className="w-4 h-4" />}
               {restoreStatus.type === "error" && <AlertCircle className="w-4 h-4" />}
               <span>{restoreStatus.message}</span>

@@ -435,3 +435,114 @@ body {
   0%, 100% { transform: scale(0.8); opacity: 0.4; }
   50% { transform: scale(1.2); opacity: 1; }
 }
+
+/* ===========================================
+   RNA PAGE LIGHT THEME
+   =========================================== */
+.rna-page-light {
+  --background: #ffffff;
+  --foreground: #1e293b;
+
+  --primary: #f97316;
+  --primary-foreground: #ffffff;
+
+  --secondary: #3b82f6;
+  --secondary-foreground: #ffffff;
+
+  --accent: #06b6d4;
+  --accent-foreground: #ffffff;
+
+  --card: rgba(255, 255, 255, 0.85);
+  --card-foreground: #1e293b;
+
+  --border: rgba(226, 232, 240, 0.8);
+  --muted: rgba(241, 245, 249, 0.8);
+  --muted-foreground: #64748b;
+
+  background: #ffffff;
+  color: #1e293b;
+}
+
+.rna-page-light body,
+.rna-page-light .min-h-screen {
+  background: #ffffff;
+  color: #1e293b;
+}
+
+.rna-page-light .glass {
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.rna-page-light .glass-card {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.rna-page-light .glass-nav {
+  background: rgba(255, 255, 255, 0.9);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.rna-page-light .glow-orange {
+  box-shadow: 0 0 30px rgba(249, 115, 22, 0.15),
+              0 0 60px rgba(249, 115, 22, 0.08);
+}
+
+.rna-page-light .glow-blue {
+  box-shadow: 0 0 30px rgba(59, 130, 246, 0.15),
+              0 0 60px rgba(59, 130, 246, 0.08);
+}
+
+.rna-page-light .glow-cyan {
+  box-shadow: 0 0 30px rgba(6, 182, 212, 0.15),
+              0 0 60px rgba(6, 182, 212, 0.08);
+}
+
+.rna-page-light .btn-primary {
+  box-shadow: 0 2px 12px rgba(249, 115, 22, 0.2);
+}
+
+.rna-page-light .btn-primary:hover {
+  box-shadow: 0 4px 20px rgba(249, 115, 22, 0.3);
+}
+
+.rna-page-light ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+.rna-page-light ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.rna-page-light ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.rna-page-light ::selection {
+  background: rgba(249, 115, 22, 0.2);
+  color: #1e293b;
+}
+
+.rna-page-light .gradient-text-orange-blue {
+  background: linear-gradient(135deg, #ea580c 0%, #2563eb 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Stabilize glass-card for GPU compositing */
+.rna-page-light .glass-card,
+.glass-card {
+  will-change: transform;
+  transform: translateZ(0);
+}
+

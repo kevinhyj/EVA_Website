@@ -11,9 +11,14 @@ export async function POST(request: NextRequest) {
 
     // Map frontend mode to backend task_type
     const modeToTaskType: Record<string, string> = {
+      // New composite mode names
+      'clm-generate': 'generate',
+      'clm-scoring': 'scoring',
+      'glm-infill': 'infill',
+      // Legacy format for backward compatibility
       'clm': 'generate',
       'glm': 'infill',
-      'predict': 'scoring'
+      'predict': 'scoring',
     };
 
     // If mode is provided, convert to task_type
@@ -60,6 +65,11 @@ export async function POST(request: NextRequest) {
     // Add species if provided
     if (body.species) {
       transformedBody.species = body.species;
+    }
+
+    // Add taxid if provided (for species-specific generation)
+    if (body.taxid) {
+      transformedBody.taxid = body.taxid;
     }
 
     // Transform parameters (convert camelCase to snake_case)

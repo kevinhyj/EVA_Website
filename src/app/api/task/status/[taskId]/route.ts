@@ -86,3 +86,44 @@ export async function DELETE(
     );
   }
 }
+
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ taskId: string }> }
+) {
+  try {
+    const { taskId } = await params;
+
+    if (!taskId) {
+      return NextResponse.json(
+        { error: "taskId is required" },
+        { status: 400 }
+      );
+    }
+
+    // Forward cancel request to backend API
+    const response = await fetch(`${API_BASE_URL}/api/task/${taskId}/cancel`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: data.detail || "Failed to cancel task" },
+        { status: response.status }
+      );
+    }
+
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error("Task cancel error:", error);
+    return NextResponse.json(
+      { error: "Failed to connect to backend API" },
+      { status: 500 }
+    );
+  }
+}
