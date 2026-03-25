@@ -9,7 +9,6 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
   Legend,
   ResponsiveContainer,
 } from 'recharts';
@@ -34,6 +33,7 @@ const SECTION_LABELS: Record<string, string> = {
 const MRAN_ORDER = ['mran_HIV', 'mran_linear_mrna', 'mran_vzv', 'mran_RABV'];
 const CIRC_ORDER = ['circ_sars1', 'circ_t41', 'circ_rabv', 'circ_quliang'];
 const SAMPLE_INTERVAL = 20;
+const DESIGN_TABS = ['designcase_1', 'designcase_2', 'designcase_3', 'designcase_4', 'designcase_5'] as const;
 
 function samplePoints<T>(points: T[], interval: number): T[] {
   if (points.length <= 2) return points;
@@ -146,17 +146,6 @@ function StarDot(props: any) {
 }
 
 function MiniChart({ data, title, resetKey, showStarOnLastPoint = false }: MiniChartProps) {
-  if (!data || data.length === 0 || data[0].value.length === 0) {
-    return (
-      <div className="flex flex-col items-center border border-gray-200 rounded p-1">
-        <h4 className="text-xs font-semibold mb-1 text-center text-primary">{title}</h4>
-        <div className="w-full h-[300px] flex items-center justify-center text-xs text-muted-foreground">
-          No data
-        </div>
-      </div>
-    );
-  }
-
   const seriesData = useMemo(() => {
     return data.map((d) => ({
       name: d.name,
@@ -166,6 +155,7 @@ function MiniChart({ data, title, resetKey, showStarOnLastPoint = false }: MiniC
       ).sort((a, b) => b.mfe - a.mfe),
     }));
   }, [data]);
+  const hasData = seriesData.length > 0 && seriesData.some((s) => s.points.length > 0);
 
   const maxLen = Math.max(...seriesData.map((s) => s.points.length), 0);
   const axisDomain = useMemo(() => {
@@ -201,24 +191,47 @@ function MiniChart({ data, title, resetKey, showStarOnLastPoint = false }: MiniC
   const [visibleCount, setVisibleCount] = useState(0);
 
   useEffect(() => {
+    if (!hasData) {
+      setVisibleCount(0);
+      return;
+    }
+
     setVisibleCount(1);
     if (maxLen === 0) return;
     if (maxLen <= 1) return;
+
     const duration = maxLen * 100;
-    const start = performance.now();
-    let rafId = 0;
-    const tick = (now: number) => {
-      const elapsed = now - start;
-      const progress = Math.min(elapsed / duration, 1);
-      const count = Math.max(1, Math.ceil(progress * maxLen));
-      setVisibleCount(count);
+    const tickMs = 50;
+    const start = Date.now();
+    const intervalId = window.setInterval(() => {
+      const elapsed = Date.now() - start;
+      const progress = Math.min(elapsed / 1500, 1);
+      const nextCount = Math.max(1, Math.ceil(progress * maxLen));
+      setVisibleCount((prev) => (prev === nextCount ? prev : nextCount));
       if (progress < 1) {
-        rafId = requestAnimationFrame(tick);
+        return;
       }
-    };
-    rafId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(rafId);
-  }, [maxLen, title, resetKey]);
+      window.clearInterval(intervalId);
+    }, tickMs);
+
+    return () => window.clearInterval(intervalId);
+  }, [hasData, maxLen, resetKey]);
+
+  const visibleSeriesData = useMemo(
+    () => seriesData.map((series) => ({ ...series, visiblePoints: series.points.slice(0, visibleCount) })),
+    [seriesData, visibleCount]
+  );
+
+  if (!hasData) {
+    return (
+      <div className="flex flex-col items-center border border-gray-200 rounded p-1">
+        <h4 className="text-xs font-semibold mb-1 text-center text-primary">{title}</h4>
+        <div className="w-full h-[300px] flex items-center justify-center text-xs text-muted-foreground">
+          No data
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-center border border-gray-200 rounded p-1">
@@ -257,17 +270,17 @@ function MiniChart({ data, title, resetKey, showStarOnLastPoint = false }: MiniC
               }
             />
             {showStarOnLastPoint && <Legend wrapperStyle={{ fontSize: '10px' }} iconType="line" />}
-            {seriesData.map((series) => (
+            {visibleSeriesData.map((series) => (
               <Line
                 key={series.name}
                 name={series.name}
-                data={series.points.slice(0, visibleCount)}
+                data={series.visiblePoints}
                 type="linear"
                 dataKey="mfe"
                 stroke={COLORS[series.name]}
                 strokeWidth={4.5}
                 strokeOpacity={0.9}
-                dot={showStarOnLastPoint ? (props) => <StarDot {...props} points={series.points.slice(0, visibleCount)} seriesName={series.name} /> : false}
+                dot={showStarOnLastPoint ? (props) => <StarDot {...props} points={series.visiblePoints} seriesName={series.name} /> : false}
                 isAnimationActive={false}
               />
             ))}
@@ -304,29 +317,27 @@ export function DesignCase() {
     return () => { cancelled = true; };
   }, []);
 
-  const designTabs = ['designcase_1', 'designcase_2', 'designcase_3', 'designcase_4', 'designcase_5'] as const;
-
   useEffect(() => {
     const interval = setInterval(() => {
       setActiveDesignTab((current) => {
-        const idx = designTabs.indexOf(current);
-        const nextIdx = (idx + 1) % designTabs.length;
-        return designTabs[nextIdx];
+        const idx = DESIGN_TABS.indexOf(current);
+        const nextIdx = (idx + 1) % DESIGN_TABS.length;
+        return DESIGN_TABS[nextIdx];
       });
-    }, 3000);
+    }, 4000);
     return () => clearInterval(interval);
   }, []);
 
   const handleDesignPrev = () => {
-    const idx = designTabs.indexOf(activeDesignTab);
-    const nextIdx = (idx - 1 + designTabs.length) % designTabs.length;
-    setActiveDesignTab(designTabs[nextIdx]);
+    const idx = DESIGN_TABS.indexOf(activeDesignTab);
+    const nextIdx = (idx - 1 + DESIGN_TABS.length) % DESIGN_TABS.length;
+    setActiveDesignTab(DESIGN_TABS[nextIdx]);
   };
 
   const handleDesignNext = () => {
-    const idx = designTabs.indexOf(activeDesignTab);
-    const nextIdx = (idx + 1) % designTabs.length;
-    setActiveDesignTab(designTabs[nextIdx]);
+    const idx = DESIGN_TABS.indexOf(activeDesignTab);
+    const nextIdx = (idx + 1) % DESIGN_TABS.length;
+    setActiveDesignTab(DESIGN_TABS[nextIdx]);
   };
 
   return (
@@ -384,6 +395,7 @@ export function DesignCase() {
                   src="/designcase/designcase_1.svg"
                   alt="CRISPR-Cas De novo Design"
                   fill
+                  sizes="(min-width: 1024px) 70vw, 90vw"
                   className="object-contain"
                 />
               )}
@@ -392,6 +404,7 @@ export function DesignCase() {
                   src="/designcase/designcase_2.svg"
                   alt="tRNA De novo Design"
                   fill
+                  sizes="(min-width: 1024px) 70vw, 90vw"
                   className="object-contain"
                 />
               )}
@@ -400,6 +413,7 @@ export function DesignCase() {
                   src="/designcase/designcase_3.svg"
                   alt="RNA-aptamer De novo Design"
                   fill
+                  sizes="(min-width: 1024px) 70vw, 90vw"
                   className="object-contain"
                 />
               )}

@@ -36,7 +36,7 @@ export function ZeroShotPrediction() {
               <div className="flex flex-col items-center">
                 <div className="w-full aspect-video relative mb-4">
                   <Image
-                    src="/designcase/ncRNA_SOTA.png"
+                    src="/designcase/zero_shot_fitness_ncrna.svg"
                     alt="SOTA in ncRNA"
                     fill
                     className="object-contain"
@@ -48,7 +48,7 @@ export function ZeroShotPrediction() {
               <div className="flex flex-col items-center">
                 <div className="w-full aspect-video relative mb-4">
                   <Image
-                    src="/designcase/mRNA_SOTA.svg"
+                    src="/designcase/zero_shot_fitness_mrna.svg"
                     alt="SOTA in mRNA"
                     fill
                     className="object-contain"

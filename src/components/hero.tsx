@@ -9,6 +9,7 @@ export function Hero() {
   const heroRef = useRef<HTMLDivElement>(null);
   const isAutoScrolling = useRef(false);
   const autoScrollRaf = useRef<number>(0);
+  const touchStartY = useRef<number | null>(null);
   const router = useRouter();
 
   const prevProgress = useRef(0);
@@ -27,12 +28,8 @@ export function Hero() {
   const contentOpacity = useTransform(scrollYProgress, [0.05, 0.3], [1, 0]);
   const starsOpacity = useTransform(scrollYProgress, [0.65, 0.9], [1, 0]);
 
-  // Background color transition from dark to white (gradual from 35% to 100%)
-  const heroBg = useTransform(
-    scrollYProgress,
-    [0, 0.35, 0.75, 1.0],
-    ['#020617', '#020617', '#f0f2f5', '#ffffff']
-  );
+  // Avoid animating full-screen backgroundColor directly; use overlay opacity instead.
+  const bgLightOpacity = useTransform(scrollYProgress, [0.35, 0.75, 1.0], [0, 0.9, 1]);
 
   // Auto-scroll: detect small scroll and auto-complete the animation
   useMotionValueEvent(scrollYProgress, "change", (latest) => {
@@ -48,31 +45,23 @@ export function Hero() {
   function startAutoScroll() {
     if (!heroRef.current || isAutoScrolling.current) return;
     isAutoScrolling.current = true;
+    cancelAnimationFrame(autoScrollRaf.current);
+
     const targetY = heroRef.current.offsetTop + heroRef.current.offsetHeight;
     const startY = window.scrollY;
     const distance = targetY - startY;
-    const duration = 2000; // 3s
+    const duration = 1200;
     let startTime: number | null = null;
 
     function step(timestamp: number) {
-      if (!isAutoScrolling.current) return; // interrupted
+      if (!isAutoScrolling.current) return;
       if (!startTime) startTime = timestamp;
       const elapsed = timestamp - startTime;
       const progress = Math.min(elapsed / duration, 1);
-      // Gentle ease: slow start, long linear middle, soft landing
-      let ease: number;
-      if (progress < 0.08) {
-        const t = progress / 0.08;
-        ease = t * t * 0.08;
-      } else if (progress < 0.85) {
-        ease = 0.08 + (progress - 0.08) * (0.84 / 0.77);
-      } else {
-        const t = (progress - 0.85) / 0.15;
-        ease = 0.92 + (1 - (1 - t) * (1 - t)) * 0.08;
-      }
+      const ease = 1 - Math.pow(1 - progress, 3);
 
       // Use behavior: 'instant' to bypass CSS scroll-smooth
-      window.scrollTo({ top: startY + distance * ease, behavior: 'instant' as ScrollBehavior });
+      window.scrollTo({ top: startY + distance * ease, behavior: "instant" as ScrollBehavior });
 
       if (progress < 1) {
         autoScrollRaf.current = requestAnimationFrame(step);
@@ -84,56 +73,56 @@ export function Hero() {
     autoScrollRaf.current = requestAnimationFrame(step);
   }
 
-  // Block native scroll during auto-scroll; only allow upward scroll to interrupt
+  // Block native scroll during auto-scroll; allow upward gesture to interrupt.
   useEffect(() => {
     function handleWheel(e: WheelEvent) {
       if (!isAutoScrolling.current) return;
       if (e.deltaY < 0) {
-        // User scrolls up — interrupt auto-scroll
         isAutoScrolling.current = false;
         cancelAnimationFrame(autoScrollRaf.current);
       } else {
-        // User scrolls down — block native scroll so it doesn't fight our animation
         e.preventDefault();
       }
     }
 
-    function handleTouch(e: TouchEvent) {
-      if (!isAutoScrolling.current) return;
-      const startY = e.touches[0].clientY;
-      function handleTouchMove(me: TouchEvent) {
-        if (me.touches[0].clientY > startY + 30) {
-          isAutoScrolling.current = false;
-          cancelAnimationFrame(autoScrollRaf.current);
-        }
-        window.removeEventListener('touchmove', handleTouchMove);
-      }
-      window.addEventListener('touchmove', handleTouchMove, { passive: true, once: true });
+    function handleTouchStart(e: TouchEvent) {
+      touchStartY.current = e.touches[0]?.clientY ?? null;
     }
 
-    // Must NOT be passive so we can preventDefault on wheel during auto-scroll
-    window.addEventListener('wheel', handleWheel, { passive: false });
-    window.addEventListener('touchstart', handleTouch, { passive: true });
+    function handleTouchMove(e: TouchEvent) {
+      if (!isAutoScrolling.current) return;
+      const startY = touchStartY.current;
+      if (startY == null) return;
+      const currentY = e.touches[0]?.clientY ?? startY;
+
+      if (currentY > startY + 30) {
+        isAutoScrolling.current = false;
+        cancelAnimationFrame(autoScrollRaf.current);
+      }
+    }
+
+    window.addEventListener("wheel", handleWheel, { passive: false });
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchmove", handleTouchMove, { passive: true });
 
     return () => {
-      window.removeEventListener('wheel', handleWheel);
-      window.removeEventListener('touchstart', handleTouch);
+      window.removeEventListener("wheel", handleWheel);
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchmove", handleTouchMove);
       cancelAnimationFrame(autoScrollRaf.current);
     };
   }, []);
 
   return (
     <section ref={heroRef} className="relative h-[250vh]">
-      <motion.div
-        className="sticky top-0 h-screen w-full overflow-hidden will-change-transform"
-        style={{ backgroundColor: heroBg }}
-      >
+      <motion.div className="sticky top-0 h-screen w-full overflow-hidden bg-[#020617]">
+        <motion.div className="absolute inset-0 z-0 bg-white" style={{ opacity: bgLightOpacity }} />
+
         {/* Cosmic Background */}
         <motion.div
-          className="absolute inset-0 z-0"
+          className="absolute inset-0 z-10"
           style={{
             opacity: starsOpacity,
-            willChange: 'opacity',
           }}
         >
           <CosmicBackground onStarClick={handleStarClick} scrollYProgress={scrollYProgress} />
@@ -145,7 +134,6 @@ export function Hero() {
           style={{
             scale: contentScale,
             opacity: contentOpacity,
-            willChange: 'transform, opacity',
           }}
         >
           <motion.h1
