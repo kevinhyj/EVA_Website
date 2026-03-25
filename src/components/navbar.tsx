@@ -22,6 +22,7 @@ const navLinks = [
   { href: "https://github.com/kevinhyj/EVA1", label: "Github", icon: FileText },
   { href: "#team", label: "Team", icon: Users },
   { href: "/eva2", label: "EVA2", icon: Users },
+  { href: "https://www.biorxiv.org/content/10.64898/2026.03.17.712398v1", label: "paper", icon: Users },
 ];
 
 export function Navbar() {
