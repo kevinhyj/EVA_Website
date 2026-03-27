@@ -17,6 +17,7 @@ import {
   ArrowRight,
   ChevronDown,
   Settings2,
+  Square,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LoadingSpinner } from "@/components/loading";
@@ -27,7 +28,6 @@ import { SPECIES_TAXID_MAP } from "@/data/rnaTypes";
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 type ClmSubMode = "clm-generate" | "clm-score";
-type GlmSubMode = "glm-infill";
 
 interface Props {
   rnaType: RNAType;
@@ -104,6 +104,8 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
   const taxidInputRef = useRef<HTMLInputElement>(null);
   const clmTimerRef = useRef<NodeJS.Timeout | null>(null);
   const glmTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const clmTaskIdRef = useRef<string | null>(null);
+  const glmTaskIdRef = useRef<string | null>(null);
   const prefillConsumedRef = useRef(false);
   const isMountedRef = useRef(true);
 
@@ -168,13 +170,16 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
     onComplete: (seq: string, score: number | null) => void,
     onError: (msg: string) => void,
     onProgress: (msg: string) => void,
-    timerRef: React.MutableRefObject<NodeJS.Timeout | null>
+    timerRef: React.MutableRefObject<NodeJS.Timeout | null>,
+    taskIdRef?: React.MutableRefObject<string | null>
   ) => {
     const MAX_POLLS = 300;
     let pollCount = 0;
 
     const poll = async (): Promise<void> => {
       if (!isMountedRef.current) return;
+      // If taskIdRef was cleared (by stop button), stop polling
+      if (taskIdRef && taskIdRef.current === null) return;
       if (pollCount >= MAX_POLLS) {
         onError("Task timed out after 10 minutes");
         return;
@@ -190,6 +195,8 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
 
         const data = await response.json();
         if (!isMountedRef.current) return;
+        // Stop polling if task was cancelled externally
+        if (taskIdRef && taskIdRef.current === null) return;
 
         if (data.status === "completed") {
           const result = data.result || {};
@@ -212,6 +219,7 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
         }
       } catch {
         if (!isMountedRef.current) return;
+        if (taskIdRef && taskIdRef.current === null) return;
         pollCount++;
         timerRef.current = setTimeout(poll, 2000);
       }
@@ -251,6 +259,27 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
     }
     setGlmSeqError("");
     return true;
+  };
+
+  /* ---- CLM stop ---- */
+  const handleClmStop = async () => {
+    if (!clmTaskIdRef.current) return;
+    try {
+      await fetch(`/api/task/status/${clmTaskIdRef.current}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (e) {
+      console.error("Stop error:", e);
+    }
+    setClmTaskStatus("idle");
+    setClmTaskMessage("");
+    setClmIsRunning(false);
+    if (clmTimerRef.current) {
+      clearTimeout(clmTimerRef.current);
+      clmTimerRef.current = null;
+    }
+    clmTaskIdRef.current = null;
   };
 
   /* ---- CLM run ---- */
@@ -299,6 +328,7 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
         throw new Error(err.error || "Task submission failed");
       }
       const { task_id } = await res.json();
+      clmTaskIdRef.current = task_id;
       setClmTaskMessage("Task queued, waiting for GPU...");
 
       await pollTaskStatus(
@@ -308,26 +338,49 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
           setClmTaskMessage("Task completed");
           setClmResultSeq(seq);
           setClmResultScore(score);
+          clmTaskIdRef.current = null;
         },
         (msg) => {
           setClmTaskStatus("error");
           setClmTaskMessage(msg);
+          clmTaskIdRef.current = null;
         },
         (msg) => setClmTaskMessage(msg),
-        clmTimerRef
+        clmTimerRef,
+        clmTaskIdRef
       );
     } catch (error) {
       console.error("CLM task error:", error);
       setClmTaskStatus("error");
-      setClmTaskMessage(error instanceof Error ? error.message : "Task failed");
-      await new Promise((r) => setTimeout(r, 500));
-      const len = clmMode === "clm-generate" ? clmMaxLength : Math.max(clmSequence.length, 50);
-      setClmResultSeq(randomSeq(Math.min(len, MAX_SEQ_LEN)));
-      setClmResultScore(parseFloat((Math.random() * 0.6 + 0.4).toFixed(4)));
+      const msg = error instanceof Error ? error.message : "Task failed. Please check your connection and try again.";
+      setClmTaskMessage(msg);
+      clmTaskIdRef.current = null;
     } finally {
       setClmIsRunning(false);
+      clmTaskIdRef.current = null;
       localStorage.removeItem(`rna_session_${rnaType.id}`);
     }
+  };
+
+  /* ---- GLM stop ---- */
+  const handleGlmStop = async () => {
+    if (!glmTaskIdRef.current) return;
+    try {
+      await fetch(`/api/task/status/${glmTaskIdRef.current}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (e) {
+      console.error("Stop error:", e);
+    }
+    setGlmTaskStatus("idle");
+    setGlmTaskMessage("");
+    setGlmIsRunning(false);
+    if (glmTimerRef.current) {
+      clearTimeout(glmTimerRef.current);
+      glmTimerRef.current = null;
+    }
+    glmTaskIdRef.current = null;
   };
 
   /* ---- GLM run ---- */
@@ -339,8 +392,6 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
     setGlmResultScore(null);
     setGlmTaskStatus("running");
     setGlmTaskMessage("Submitting task...");
-
-    const taskId = crypto.randomUUID();
 
     const payload: any = {
       task_type: "infill",
@@ -362,6 +413,7 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
         throw new Error(err.error || "Task submission failed");
       }
       const { task_id } = await res.json();
+      glmTaskIdRef.current = task_id;
       setGlmTaskMessage("Task queued, waiting for GPU...");
 
       await pollTaskStatus(
@@ -371,24 +423,26 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
           setGlmTaskMessage("Task completed");
           setGlmResultSeq(seq);
           setGlmResultScore(score);
+          glmTaskIdRef.current = null;
         },
         (msg) => {
           setGlmTaskStatus("error");
           setGlmTaskMessage(msg);
+          glmTaskIdRef.current = null;
         },
         (msg) => setGlmTaskMessage(msg),
-        glmTimerRef
+        glmTimerRef,
+        glmTaskIdRef
       );
     } catch (error) {
       console.error("GLM task error:", error);
       setGlmTaskStatus("error");
-      setGlmTaskMessage(error instanceof Error ? error.message : "Task failed");
-      await new Promise((r) => setTimeout(r, 500));
-      const len = Math.max(glmSequence.replace(/<mask>/gi, "").length + 20, 50);
-      setGlmResultSeq(randomSeq(Math.min(len, MAX_SEQ_LEN)));
-      setGlmResultScore(parseFloat((Math.random() * 0.6 + 0.4).toFixed(4)));
+      const msg = error instanceof Error ? error.message : "Task failed. Please check your connection and try again.";
+      setGlmTaskMessage(msg);
+      glmTaskIdRef.current = null;
     } finally {
       setGlmIsRunning(false);
+      glmTaskIdRef.current = null;
     }
   };
 
@@ -513,7 +567,7 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
                 : "text-slate-400 hover:text-slate-600 bg-slate-50"
             )}
           >
-            {tab === "clm" ? "CLM · Generate & Score" : "GLM · Infill"}
+            {tab === "clm" ? "De novo Design & Directed Evolution" : "Domain Redesign"}
           </button>
         ))}
       </div>
@@ -533,7 +587,7 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
                 clmMode === "clm-generate" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
               )}
             >
-              <Sparkles className="w-3 h-3" /> Generate
+              <Sparkles className="w-3 h-3" /> De novo Design
             </button>
             <button
               onClick={() => { setClmMode("clm-score"); setClmResultSeq(""); setClmResultScore(null); setClmTaskStatus("idle"); }}
@@ -542,7 +596,7 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
                 clmMode === "clm-score" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
               )}
             >
-              <FlaskConical className="w-3 h-3" /> Score
+              <FlaskConical className="w-3 h-3" /> Directed Evolution
             </button>
           </div>
 
@@ -638,14 +692,16 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
                 transition={{ duration: 0.2 }}
                 className="overflow-hidden space-y-3 pt-1"
               >
-                {/* Max length */}
-                <div>
-                  <div className="flex justify-between mb-1">
-                    <label className="text-xs font-medium text-slate-500">Max Length</label>
-                    <span className="text-xs font-mono text-blue-500">{clmMaxLength}</span>
+                {/* Max length — only for De novo Design */}
+                {clmMode === "clm-generate" && (
+                  <div>
+                    <div className="flex justify-between mb-1">
+                      <label className="text-xs font-medium text-slate-500">Max Length</label>
+                      <span className="text-xs font-mono text-blue-500">{clmMaxLength}</span>
+                    </div>
+                    <input type="range" min={10} max={MAX_SEQ_LEN} step={10} value={clmMaxLength} onChange={(e) => setClmMaxLength(Number(e.target.value))} className="w-full accent-blue-500" />
                   </div>
-                  <input type="range" min={10} max={MAX_SEQ_LEN} step={10} value={clmMaxLength} onChange={(e) => setClmMaxLength(Number(e.target.value))} className="w-full accent-blue-500" />
-                </div>
+                )}
                 {/* Temperature */}
                 <div>
                   <div className="flex justify-between mb-1">
@@ -669,16 +725,19 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
 
           {/* Run button */}
           <button
-            onClick={handleClmRun}
-            disabled={clmIsRunning || (clmMode === "clm-score" && !clmSequence.trim()) || !!clmSeqError}
+            onClick={clmIsRunning ? handleClmStop : handleClmRun}
+            disabled={!clmIsRunning && ((clmMode === "clm-score" && !clmSequence.trim()) || !!clmSeqError)}
             className={cn(
-              "w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all",
+              "w-full flex items-center justify-center gap-2 py-1.5 rounded-lg text-sm font-semibold transition-all",
               clmIsRunning
-                ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                ? "bg-red-500 hover:bg-red-600 text-white shadow-sm cursor-pointer"
                 : "bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
             )}
           >
-            {clmIsRunning ? <><LoadingSpinner className="w-4 h-4" /> Running…</> : <><Play className="w-4 h-4" /> Run CLM</>}
+            {clmIsRunning
+              ? <><Square className="w-4 h-4" /> Stop</>
+              : <><Play className="w-4 h-4" /> {clmMode === "clm-generate" ? "Run De novo Design" : "Run Directed Evolution"}</>
+            }
           </button>
 
           {/* Result */}
@@ -793,16 +852,19 @@ Example: AUGCUAGC<mask>UAGCUAGC"
 
           {/* Run button */}
           <button
-            onClick={handleGlmRun}
-            disabled={glmIsRunning || !glmSequence.trim() || !!glmSeqError}
+            onClick={glmIsRunning ? handleGlmStop : handleGlmRun}
+            disabled={!glmIsRunning && (!glmSequence.trim() || !!glmSeqError)}
             className={cn(
-              "w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all",
-              glmIsRunning || !glmSequence.trim() || !!glmSeqError
-                ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+              "w-full flex items-center justify-center gap-2 py-1.5 rounded-lg text-sm font-semibold transition-all",
+              glmIsRunning
+                ? "bg-red-500 hover:bg-red-600 text-white shadow-sm cursor-pointer"
                 : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
             )}
           >
-            {glmIsRunning ? <><LoadingSpinner className="w-4 h-4" /> Running…</> : <><Wand2 className="w-4 h-4" /> Run GLM</>}
+            {glmIsRunning
+              ? <><Square className="w-4 h-4" /> Stop</>
+              : <><Wand2 className="w-4 h-4" /> Run Domain Redesign</>
+            }
           </button>
 
           {/* Result */}
