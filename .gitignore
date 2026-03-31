@@ -77,3 +77,5 @@ logs/
 .env.development.local
 .env.test.local
 .env.production.local
+
+24000279_evabio.net_nginx.zip

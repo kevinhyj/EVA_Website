@@ -5,22 +5,19 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Play,
   Sparkles,
-  FileText,
   Copy,
   Download,
-  RotateCcw,
   Wand2,
   Check,
   AlertCircle,
   FlaskConical,
   Hash,
-  ArrowRight,
   ChevronDown,
   Settings2,
   Square,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { LoadingSpinner } from "@/components/loading";
 import type { RNAType } from "@/data/rnaTypes";
 import { SPECIES_TAXID_MAP } from "@/data/rnaTypes";
 
@@ -54,6 +51,8 @@ interface Props {
 }
 
 const MAX_SEQ_LEN = 10_000;
+const SESSION_KEY_CLM = (id: string) => `eva_task_clm_${id}`;
+const SESSION_KEY_GLM = (id: string) => `eva_task_glm_${id}`;
 
 /* Helper: random AUGC sequence */
 function randomSeq(len: number): string {
@@ -71,23 +70,21 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
   const [clmMode, setClmMode] = useState<ClmSubMode>("clm-generate");
   const [clmSequence, setClmSequence] = useState("");
   const [clmSeqError, setClmSeqError] = useState("");
-  const [clmMaxLength, setClmMaxLength] = useState(200);
+  const [clmMaxLength, setClmMaxLength] = useState(1000);
   const [clmResultSeq, setClmResultSeq] = useState("");
   const [clmResultScore, setClmResultScore] = useState<number | null>(null);
-  const [clmCopied, setClmCopied] = useState(false);
-  const [clmIsRunning, setClmIsRunning] = useState(false);
   const [clmTaskStatus, setClmTaskStatus] = useState<"idle" | "running" | "completed" | "error">("idle");
   const [clmTaskMessage, setClmTaskMessage] = useState("");
+  const [clmProgress, setClmProgress] = useState<{ nucleotides: number; max_length: number } | null>(null);
 
   /* ---- GLM state ---- */
   const [glmSequence, setGlmSequence] = useState("");
   const [glmSeqError, setGlmSeqError] = useState("");
   const [glmResultSeq, setGlmResultSeq] = useState("");
   const [glmResultScore, setGlmResultScore] = useState<number | null>(null);
-  const [glmCopied, setGlmCopied] = useState(false);
-  const [glmIsRunning, setGlmIsRunning] = useState(false);
   const [glmTaskStatus, setGlmTaskStatus] = useState<"idle" | "running" | "completed" | "error">("idle");
   const [glmTaskMessage, setGlmTaskMessage] = useState("");
+  const [glmProgress, setGlmProgress] = useState<{ nucleotides: number; max_length: number } | null>(null);
 
   /* ---- Shared state ---- */
   const [species, setSpecies] = useState("");
@@ -96,7 +93,6 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
   const [temperature, setTemperature] = useState(0.7);
   const [topK, setTopK] = useState(50);
   const [showTaxidInput, setShowTaxidInput] = useState(false);
-
   const [activeTab, setActiveTab] = useState<"clm" | "glm">("clm");
   const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -106,8 +102,13 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
   const glmTimerRef = useRef<NodeJS.Timeout | null>(null);
   const clmTaskIdRef = useRef<string | null>(null);
   const glmTaskIdRef = useRef<string | null>(null);
+  const clmCancelledRef = useRef(false);
+  const glmCancelledRef = useRef(false);
   const prefillConsumedRef = useRef(false);
   const isMountedRef = useRef(true);
+  // Track if we've resumed a task from sessionStorage to avoid re-polling
+  const clmResumedRef = useRef(false);
+  const glmResumedRef = useRef(false);
 
   const speciesList = rnaType.species ?? [];
 
@@ -120,10 +121,11 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
     };
   }, []);
 
-  /* ---- prefill ---- */
+  /* ---- sessionStorage persistence: restore running tasks on mount ---- */
   useEffect(() => {
     if (prefillConsumedRef.current) return;
 
+    // --- prefill (from parent) ---
     let hasData = false;
 
     if (prefillSettings) {
@@ -161,42 +163,78 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
       prefillConsumedRef.current = true;
       onPrefillConsumed?.();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefillSequence, prefillSpecies, prefillSettings, prefillResult]);
 
-  /* ---- poll shared helper ---- */
-  const pollTaskStatus = async (
-    taskId: string,
-    onComplete: (seq: string, score: number | null) => void,
-    onError: (msg: string) => void,
-    onProgress: (msg: string) => void,
-    timerRef: React.MutableRefObject<NodeJS.Timeout | null>,
-    taskIdRef?: React.MutableRefObject<string | null>
-  ) => {
-    const MAX_POLLS = 300;
-    let pollCount = 0;
+    // --- restore from sessionStorage ---
+    const clmKey = SESSION_KEY_CLM(rnaType.id);
+    const glmKey = SESSION_KEY_GLM(rnaType.id);
 
-    const poll = async (): Promise<void> => {
-      if (!isMountedRef.current) return;
-      // If taskIdRef was cleared (by stop button), stop polling
-      if (taskIdRef && taskIdRef.current === null) return;
-      if (pollCount >= MAX_POLLS) {
-        onError("Task timed out after 10 minutes");
-        return;
+    try {
+      const clmStored = sessionStorage.getItem(clmKey);
+      const glmStored = sessionStorage.getItem(glmKey);
+
+      if (clmStored) {
+        try {
+          const stored = JSON.parse(clmStored);
+          if (stored.taskId && Date.now() - stored.timestamp < 24 * 60 * 60 * 1000) {
+            // Restore CLM running state
+            clmTaskIdRef.current = stored.taskId;
+            setClmTaskStatus("running");
+            setClmTaskMessage("Task running...");
+            setClmMaxLength(stored.maxLength || 1000);
+            setClmMode(stored.mode || "clm-generate");
+            if (stored.sequence) setClmSequence(stored.sequence);
+            if (stored.temperature !== undefined) setTemperature(stored.temperature);
+            if (stored.topK !== undefined) setTopK(stored.topK);
+            if (stored.taxid) {
+              setTaxid(stored.taxid);
+              setTaxidInput(String(stored.taxid));
+            }
+            // Resume polling
+            clmResumedRef.current = true;
+            resumeClmPolling(stored.taskId);
+          }
+        } catch { /* ignore parse errors */ }
       }
 
+      if (glmStored && !clmStored) {
+        try {
+          const stored = JSON.parse(glmStored);
+          if (stored.taskId && Date.now() - stored.timestamp < 24 * 60 * 60 * 1000) {
+            glmTaskIdRef.current = stored.taskId;
+            setGlmTaskStatus("running");
+            setGlmTaskMessage("Task running...");
+            setGlmSequence(stored.sequence || "");
+            if (stored.temperature !== undefined) setTemperature(stored.temperature);
+            if (stored.topK !== undefined) setTopK(stored.topK);
+            glmResumedRef.current = true;
+            resumeGlmPolling(stored.taskId);
+          }
+        } catch { /* ignore parse errors */ }
+      }
+    } catch { /* ignore storage errors */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ---- CLM polling ---- */
+  const resumeClmPolling = (taskId: string) => {
+    const poll = async () => {
+      if (!isMountedRef.current) return;
+      if (clmTaskIdRef.current === null) return;
+
       try {
-        const response = await fetch(`/api/task/status/${taskId}`);
-        if (!response.ok) {
-          pollCount++;
-          timerRef.current = setTimeout(poll, 2000);
+        const [statusRes, progressRes] = await Promise.all([
+          fetch(`/api/task/status/${taskId}`),
+          fetch(`/api/task/status/${taskId}/progress`).catch(() => null),
+        ]);
+
+        if (!statusRes.ok) {
+          clmTimerRef.current = setTimeout(poll, 2000);
           return;
         }
 
-        const data = await response.json();
+        const data = await statusRes.json();
         if (!isMountedRef.current) return;
-        // Stop polling if task was cancelled externally
-        if (taskIdRef && taskIdRef.current === null) return;
+        if (clmTaskIdRef.current === null) return;
 
         if (data.status === "completed") {
           const result = data.result || {};
@@ -208,106 +246,189 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
           let score: number | null = null;
           if (result.score !== undefined) score = result.score;
           else if (result.perplexity !== undefined) score = result.perplexity;
-          onComplete(seq, score);
+          setClmTaskStatus("completed");
+          setClmTaskMessage("Task completed");
+          setClmResultSeq(seq);
+          setClmResultScore(score);
+          setClmProgress(null);
+          clmTaskIdRef.current = null;
+          sessionStorage.removeItem(SESSION_KEY_CLM(rnaType.id));
         } else if (data.status === "failed") {
-          onError(data.error || "Task failed");
+          const errorMsg = data.error || "";
+          const isCancelled = errorMsg.toLowerCase().includes("cancelled") || errorMsg.toLowerCase().includes("cancel");
+          if (clmTaskIdRef.current === null) {
+            // Stopped externally (user clicked Stop)
+            setClmTaskStatus("idle");
+            setClmTaskMessage("");
+          } else {
+            setClmTaskStatus("error");
+            setClmTaskMessage(errorMsg || "Task failed");
+          }
+          setClmProgress(null);
+          clmTaskIdRef.current = null;
+          sessionStorage.removeItem(SESSION_KEY_CLM(rnaType.id));
         } else {
-          const progress = data.progress !== undefined ? ` (${Math.round(data.progress * 100)}%)` : "";
-          onProgress(`Processing${progress}...`);
-          pollCount++;
-          timerRef.current = setTimeout(poll, 2000);
+          // Running
+          if (progressRes) {
+            try {
+              const pg = await progressRes.json();
+              if (pg.nucleotides != null && pg.max_length != null && pg.max_length > 0) {
+                setClmProgress({ nucleotides: pg.nucleotides, max_length: pg.max_length });
+                setClmTaskMessage(`Processing ${pg.nucleotides}/${pg.max_length} nt...`);
+              } else {
+                setClmTaskMessage("Processing...");
+              }
+            } catch {
+              setClmTaskMessage("Processing...");
+            }
+          } else {
+            setClmTaskMessage("Processing...");
+          }
+          clmTimerRef.current = setTimeout(poll, 2000);
         }
       } catch {
         if (!isMountedRef.current) return;
-        if (taskIdRef && taskIdRef.current === null) return;
-        pollCount++;
-        timerRef.current = setTimeout(poll, 2000);
+        if (clmTaskIdRef.current === null) return;
+        clmTimerRef.current = setTimeout(poll, 2000);
       }
     };
 
-    await poll();
+    poll();
+  };
+
+  /* ---- GLM polling ---- */
+  const resumeGlmPolling = (taskId: string) => {
+    const poll = async () => {
+      if (!isMountedRef.current) return;
+      if (glmTaskIdRef.current === null) return;
+
+      try {
+        const [statusRes, progressRes] = await Promise.all([
+          fetch(`/api/task/status/${taskId}`),
+          fetch(`/api/task/status/${taskId}/progress`).catch(() => null),
+        ]);
+
+        if (!statusRes.ok) {
+          glmTimerRef.current = setTimeout(poll, 2000);
+          return;
+        }
+
+        const data = await statusRes.json();
+        if (!isMountedRef.current) return;
+        if (glmTaskIdRef.current === null) return;
+
+        if (data.status === "completed") {
+          const result = data.result || {};
+          let seq = "";
+          if (result.sequence) {
+            const lines = result.sequence.split("\n");
+            seq = lines.length > 1 ? lines.slice(1).join("") : result.sequence;
+          }
+          let score: number | null = null;
+          if (result.score !== undefined) score = result.score;
+          else if (result.perplexity !== undefined) score = result.perplexity;
+          setGlmTaskStatus("completed");
+          setGlmTaskMessage("Task completed");
+          setGlmResultSeq(seq);
+          setGlmResultScore(score);
+          setGlmProgress(null);
+          glmTaskIdRef.current = null;
+          sessionStorage.removeItem(SESSION_KEY_GLM(rnaType.id));
+        } else if (data.status === "failed") {
+          const errorMsg = data.error || "";
+          if (glmTaskIdRef.current === null) {
+            setGlmTaskStatus("idle");
+            setGlmTaskMessage("");
+          } else {
+            setGlmTaskStatus("error");
+            setGlmTaskMessage(errorMsg || "Task failed");
+          }
+          setGlmProgress(null);
+          glmTaskIdRef.current = null;
+          sessionStorage.removeItem(SESSION_KEY_GLM(rnaType.id));
+        } else {
+          if (progressRes) {
+            try {
+              const pg = await progressRes.json();
+              if (pg.nucleotides != null && pg.max_length != null && pg.max_length > 0) {
+                setGlmProgress({ nucleotides: pg.nucleotides, max_length: pg.max_length });
+                setGlmTaskMessage(`Processing ${pg.nucleotides}/${pg.max_length} nt...`);
+              } else {
+                setGlmTaskMessage("Processing...");
+              }
+            } catch {
+              setGlmTaskMessage("Processing...");
+            }
+          } else {
+            setGlmTaskMessage("Processing...");
+          }
+          glmTimerRef.current = setTimeout(poll, 2000);
+        }
+      } catch {
+        if (!isMountedRef.current) return;
+        if (glmTaskIdRef.current === null) return;
+        glmTimerRef.current = setTimeout(poll, 2000);
+      }
+    };
+
+    poll();
   };
 
   /* ---- CLM validation ---- */
   const validateClmSeq = (val: string) => {
-    if (val.length > MAX_SEQ_LEN) {
-      setClmSeqError(`Max ${MAX_SEQ_LEN.toLocaleString()} characters`);
-      return false;
-    }
-    if (val.length > 0 && !/^[AUGCaugc\s\n]*$/.test(val)) {
-      setClmSeqError("Only A, U, G, C allowed");
-      return false;
-    }
-    setClmSeqError("");
-    return true;
+    if (val.length > MAX_SEQ_LEN) { setClmSeqError(`Max ${MAX_SEQ_LEN.toLocaleString()} characters`); return false; }
+    if (val.length > 0 && !/^[AUGCaugc\s\n]*$/.test(val)) { setClmSeqError("Only A, U, G, C allowed"); return false; }
+    setClmSeqError(""); return true;
   };
 
   /* ---- GLM validation ---- */
   const validateGlmSeq = (val: string) => {
-    if (val.length > MAX_SEQ_LEN) {
-      setGlmSeqError(`Max ${MAX_SEQ_LEN.toLocaleString()} characters`);
-      return false;
-    }
+    if (val.length > MAX_SEQ_LEN) { setGlmSeqError(`Max ${MAX_SEQ_LEN.toLocaleString()} characters`); return false; }
     const cleaned = val.replace(/<mask>/gi, "");
-    if (cleaned.length > 0 && !/^[AUGCaugc\s\n]*$/.test(cleaned)) {
-      setGlmSeqError("Only A, U, G, C allowed (plus <mask>)");
-      return false;
-    }
-    if (!val.includes("<mask>") && val.trim().length > 0) {
-      setGlmSeqError("Include <mask> token(s) for infilling");
-      return false;
-    }
-    setGlmSeqError("");
-    return true;
+    if (cleaned.length > 0 && !/^[AUGCaugc\s\n]*$/.test(cleaned)) { setGlmSeqError("Only A, U, G, C allowed (plus <mask>)"); return false; }
+    if (!val.includes("<mask>") && val.trim().length > 0) { setGlmSeqError("Include <mask> token(s) for infilling"); return false; }
+    setGlmSeqError(""); return true;
   };
 
   /* ---- CLM stop ---- */
   const handleClmStop = async () => {
     if (!clmTaskIdRef.current) return;
-    try {
-      await fetch(`/api/task/status/${clmTaskIdRef.current}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-    } catch (e) {
-      console.error("Stop error:", e);
-    }
-    setClmTaskStatus("idle");
-    setClmTaskMessage("");
-    setClmIsRunning(false);
-    if (clmTimerRef.current) {
-      clearTimeout(clmTimerRef.current);
-      clmTimerRef.current = null;
-    }
+    const taskId = clmTaskIdRef.current;
     clmTaskIdRef.current = null;
+    clmCancelledRef.current = true;
+    clearTimeout(clmTimerRef.current || undefined);
+    clmTimerRef.current = null;
+    setClmTaskMessage("Cancelling...");
+    try {
+      await fetch(`/api/task/status/${taskId}`, { method: "POST", headers: { "Content-Type": "application/json" } });
+    } catch { /* ignore */ }
+    // The polling loop will detect the cancelled state and reset UI
+    sessionStorage.removeItem(SESSION_KEY_CLM(rnaType.id));
+    // Set a timeout to reset UI if polling doesn't respond quickly
+    setTimeout(() => {
+      if (clmTaskIdRef.current === null) {
+        setClmTaskStatus("idle");
+        setClmTaskMessage("");
+        setClmProgress(null);
+      }
+    }, 3000);
   };
 
   /* ---- CLM run ---- */
   const handleClmRun = async () => {
-    if (clmIsRunning) return;
-    setClmIsRunning(true);
+    if (clmTaskStatus === "running") return; // guard: already running
+    if (clmMode === "clm-score" && !clmSequence.trim()) return;
+    if (clmSeqError) return;
+
+    clmCancelledRef.current = false;
+    clmResumedRef.current = false;
     setClmResultSeq("");
     setClmResultScore(null);
+    setClmProgress(null);
     setClmTaskStatus("running");
     setClmTaskMessage("Submitting task...");
 
-    const taskId = crypto.randomUUID();
-    const sessionData = {
-      id: taskId,
-      sequence: clmSequence,
-      species,
-      taxid: taxid || undefined,
-      temperature,
-      topK,
-      maxLength: clmMaxLength,
-      mode: clmMode,
-      rnaTypeId: rnaType.id,
-      timestamp: Date.now(),
-    };
-    localStorage.setItem(`rna_session_${rnaType.id}`, JSON.stringify(sessionData));
-
     const taskType = clmMode === "clm-generate" ? "generate" : "scoring";
-
     const payload: any = {
       task_type: taskType,
       rna_type: rnaType.id,
@@ -331,65 +452,135 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
       clmTaskIdRef.current = task_id;
       setClmTaskMessage("Task queued, waiting for GPU...");
 
-      await pollTaskStatus(
-        task_id,
-        (seq, score) => {
-          setClmTaskStatus("completed");
-          setClmTaskMessage("Task completed");
-          setClmResultSeq(seq);
-          setClmResultScore(score);
-          clmTaskIdRef.current = null;
-        },
-        (msg) => {
-          setClmTaskStatus("error");
-          setClmTaskMessage(msg);
-          clmTaskIdRef.current = null;
-        },
-        (msg) => setClmTaskMessage(msg),
-        clmTimerRef,
-        clmTaskIdRef
-      );
+      // Persist to sessionStorage for cross-page navigation
+      sessionStorage.setItem(SESSION_KEY_CLM(rnaType.id), JSON.stringify({
+        taskId: task_id,
+        mode: clmMode,
+        sequence: clmSequence,
+        temperature,
+        topK,
+        maxLength: clmMaxLength,
+        taxid,
+        timestamp: Date.now(),
+      }));
+
+      // Start polling
+      const poll = async () => {
+        if (!isMountedRef.current) return;
+        if (clmTaskIdRef.current === null) return;
+
+        try {
+          const [statusRes, progressRes] = await Promise.all([
+            fetch(`/api/task/status/${task_id}`),
+            fetch(`/api/task/status/${task_id}/progress`).catch(() => null),
+          ]);
+
+          if (!statusRes.ok) {
+            clmTimerRef.current = setTimeout(poll, 2000);
+            return;
+          }
+
+          const data = await statusRes.json();
+          if (!isMountedRef.current) return;
+          if (clmTaskIdRef.current === null) return;
+
+          if (data.status === "completed") {
+            const result = data.result || {};
+            let seq = "";
+            if (result.sequence) {
+              const lines = result.sequence.split("\n");
+              seq = lines.length > 1 ? lines.slice(1).join("") : result.sequence;
+            }
+            let score: number | null = null;
+            if (result.score !== undefined) score = result.score;
+            else if (result.perplexity !== undefined) score = result.perplexity;
+            setClmTaskStatus("completed");
+            setClmTaskMessage("Task completed");
+            setClmResultSeq(seq);
+            setClmResultScore(score);
+            setClmProgress(null);
+            clmTaskIdRef.current = null;
+            sessionStorage.removeItem(SESSION_KEY_CLM(rnaType.id));
+          } else if (data.status === "failed") {
+            const errorMsg = data.error || "";
+            const isCancelled = errorMsg.toLowerCase().includes("cancelled") || errorMsg.toLowerCase().includes("cancel");
+            if (isCancelled && clmCancelledRef.current) {
+              setClmTaskStatus("idle");
+              setClmTaskMessage("");
+            } else {
+              setClmTaskStatus("error");
+              setClmTaskMessage(errorMsg || "Task failed");
+            }
+            setClmProgress(null);
+            clmTaskIdRef.current = null;
+            sessionStorage.removeItem(SESSION_KEY_CLM(rnaType.id));
+          } else {
+            if (progressRes) {
+              try {
+                const pg = await progressRes.json();
+                if (pg.nucleotides != null && pg.max_length != null && pg.max_length > 0) {
+                  setClmProgress({ nucleotides: pg.nucleotides, max_length: pg.max_length });
+                  setClmTaskMessage(`Processing ${pg.nucleotides}/${pg.max_length} nt...`);
+                } else {
+                  setClmTaskMessage("Processing...");
+                }
+              } catch {
+                setClmTaskMessage("Processing...");
+              }
+            } else {
+              setClmTaskMessage("Processing...");
+            }
+            clmTimerRef.current = setTimeout(poll, 2000);
+          }
+        } catch {
+          if (!isMountedRef.current) return;
+          if (clmTaskIdRef.current === null) return;
+          clmTimerRef.current = setTimeout(poll, 2000);
+        }
+      };
+
+      poll();
     } catch (error) {
       console.error("CLM task error:", error);
       setClmTaskStatus("error");
       const msg = error instanceof Error ? error.message : "Task failed. Please check your connection and try again.";
       setClmTaskMessage(msg);
-      clmTaskIdRef.current = null;
-    } finally {
-      setClmIsRunning(false);
-      clmTaskIdRef.current = null;
-      localStorage.removeItem(`rna_session_${rnaType.id}`);
+      sessionStorage.removeItem(SESSION_KEY_CLM(rnaType.id));
     }
   };
 
   /* ---- GLM stop ---- */
   const handleGlmStop = async () => {
     if (!glmTaskIdRef.current) return;
-    try {
-      await fetch(`/api/task/status/${glmTaskIdRef.current}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-    } catch (e) {
-      console.error("Stop error:", e);
-    }
-    setGlmTaskStatus("idle");
-    setGlmTaskMessage("");
-    setGlmIsRunning(false);
-    if (glmTimerRef.current) {
-      clearTimeout(glmTimerRef.current);
-      glmTimerRef.current = null;
-    }
+    const taskId = glmTaskIdRef.current;
     glmTaskIdRef.current = null;
+    glmCancelledRef.current = true;
+    clearTimeout(glmTimerRef.current || undefined);
+    glmTimerRef.current = null;
+    setGlmTaskMessage("Cancelling...");
+    try {
+      await fetch(`/api/task/status/${taskId}`, { method: "POST", headers: { "Content-Type": "application/json" } });
+    } catch { /* ignore */ }
+    sessionStorage.removeItem(SESSION_KEY_GLM(rnaType.id));
+    setTimeout(() => {
+      if (glmTaskIdRef.current === null) {
+        setGlmTaskStatus("idle");
+        setGlmTaskMessage("");
+        setGlmProgress(null);
+      }
+    }, 3000);
   };
 
   /* ---- GLM run ---- */
   const handleGlmRun = async () => {
-    if (glmIsRunning) return;
+    if (glmTaskStatus === "running") return;
     if (!glmSequence.trim() || glmSeqError) return;
-    setGlmIsRunning(true);
+
+    glmCancelledRef.current = false;
+    glmResumedRef.current = false;
     setGlmResultSeq("");
     setGlmResultScore(null);
+    setGlmProgress(null);
     setGlmTaskStatus("running");
     setGlmTaskMessage("Submitting task...");
 
@@ -416,33 +607,95 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
       glmTaskIdRef.current = task_id;
       setGlmTaskMessage("Task queued, waiting for GPU...");
 
-      await pollTaskStatus(
-        task_id,
-        (seq, score) => {
-          setGlmTaskStatus("completed");
-          setGlmTaskMessage("Task completed");
-          setGlmResultSeq(seq);
-          setGlmResultScore(score);
-          glmTaskIdRef.current = null;
-        },
-        (msg) => {
-          setGlmTaskStatus("error");
-          setGlmTaskMessage(msg);
-          glmTaskIdRef.current = null;
-        },
-        (msg) => setGlmTaskMessage(msg),
-        glmTimerRef,
-        glmTaskIdRef
-      );
+      sessionStorage.setItem(SESSION_KEY_GLM(rnaType.id), JSON.stringify({
+        taskId: task_id,
+        sequence: glmSequence,
+        temperature,
+        topK,
+        taxid,
+        timestamp: Date.now(),
+      }));
+
+      const poll = async () => {
+        if (!isMountedRef.current) return;
+        if (glmTaskIdRef.current === null) return;
+
+        try {
+          const [statusRes, progressRes] = await Promise.all([
+            fetch(`/api/task/status/${task_id}`),
+            fetch(`/api/task/status/${task_id}/progress`).catch(() => null),
+          ]);
+
+          if (!statusRes.ok) {
+            glmTimerRef.current = setTimeout(poll, 2000);
+            return;
+          }
+
+          const data = await statusRes.json();
+          if (!isMountedRef.current) return;
+          if (glmTaskIdRef.current === null) return;
+
+          if (data.status === "completed") {
+            const result = data.result || {};
+            let seq = "";
+            if (result.sequence) {
+              const lines = result.sequence.split("\n");
+              seq = lines.length > 1 ? lines.slice(1).join("") : result.sequence;
+            }
+            let score: number | null = null;
+            if (result.score !== undefined) score = result.score;
+            else if (result.perplexity !== undefined) score = result.perplexity;
+            setGlmTaskStatus("completed");
+            setGlmTaskMessage("Task completed");
+            setGlmResultSeq(seq);
+            setGlmResultScore(score);
+            setGlmProgress(null);
+            glmTaskIdRef.current = null;
+            sessionStorage.removeItem(SESSION_KEY_GLM(rnaType.id));
+          } else if (data.status === "failed") {
+            const errorMsg = data.error || "";
+            if (glmCancelledRef.current) {
+              setGlmTaskStatus("idle");
+              setGlmTaskMessage("");
+            } else {
+              setGlmTaskStatus("error");
+              setGlmTaskMessage(errorMsg || "Task failed");
+            }
+            setGlmProgress(null);
+            glmTaskIdRef.current = null;
+            sessionStorage.removeItem(SESSION_KEY_GLM(rnaType.id));
+          } else {
+            if (progressRes) {
+              try {
+                const pg = await progressRes.json();
+                if (pg.nucleotides != null && pg.max_length != null && pg.max_length > 0) {
+                  setGlmProgress({ nucleotides: pg.nucleotides, max_length: pg.max_length });
+                  setGlmTaskMessage(`Processing ${pg.nucleotides}/${pg.max_length} nt...`);
+                } else {
+                  setGlmTaskMessage("Processing...");
+                }
+              } catch {
+                setGlmTaskMessage("Processing...");
+              }
+            } else {
+              setGlmTaskMessage("Processing...");
+            }
+            glmTimerRef.current = setTimeout(poll, 2000);
+          }
+        } catch {
+          if (!isMountedRef.current) return;
+          if (glmTaskIdRef.current === null) return;
+          glmTimerRef.current = setTimeout(poll, 2000);
+        }
+      };
+
+      poll();
     } catch (error) {
       console.error("GLM task error:", error);
       setGlmTaskStatus("error");
       const msg = error instanceof Error ? error.message : "Task failed. Please check your connection and try again.";
       setGlmTaskMessage(msg);
-      glmTaskIdRef.current = null;
-    } finally {
-      setGlmIsRunning(false);
-      glmTaskIdRef.current = null;
+      sessionStorage.removeItem(SESSION_KEY_GLM(rnaType.id));
     }
   };
 
@@ -477,12 +730,13 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
 
   /* ---- result display helper ---- */
   const ResultCard = ({
-    seq, score, status, message, isRunning, onCopy, onDownload
+    seq, score, status, message, onCopy, onDownload, progressData
   }: {
     seq: string; score: number | null;
     status: "idle" | "running" | "completed" | "error";
-    message: string; isRunning: boolean;
+    message: string;
     onCopy: () => void; onDownload: () => void;
+    progressData?: { nucleotides: number; max_length: number } | null;
   }) => (
     <div>
       <AnimatePresence>
@@ -495,16 +749,38 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
             transition={{ duration: 0.3 }}
             className="space-y-3"
           >
-            {/* Status message */}
+            {/* Status message with progress bar */}
             {status !== "idle" && (
               <div className={cn(
-                "flex items-center gap-2 p-2.5 rounded-lg text-sm",
+                "flex flex-col gap-2 p-3 rounded-xl text-sm",
                 status === "running" && "bg-blue-50 text-blue-600 border border-blue-200",
                 status === "completed" && "bg-green-50 text-green-600 border border-green-200",
                 status === "error" && "bg-red-50 text-red-600 border border-red-200"
               )}>
-                {status === "running" && <LoadingSpinner className="w-4 h-4" />}
-                <span>{message}</span>
+                <div className="flex items-center gap-2">
+                  {status === "running" && <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" />}
+                  {status === "completed" && <Check className="w-4 h-4 flex-shrink-0" />}
+                  {status === "error" && <AlertCircle className="w-4 h-4 flex-shrink-0" />}
+                  <span>{message}</span>
+                </div>
+                {/* Progress bar during running */}
+                {status === "running" && progressData && (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-2 bg-blue-200 rounded-full overflow-hidden">
+                        <motion.div
+                          className="h-full bg-blue-500 rounded-full"
+                          initial={{ width: 0 }}
+                          animate={{ width: `${Math.min(100, (progressData.nucleotides / progressData.max_length) * 100)}%` }}
+                          transition={{ duration: 0.5 }}
+                        />
+                      </div>
+                      <span className="text-xs font-mono text-blue-600 whitespace-nowrap">
+                        {progressData.nucleotides}/{progressData.max_length} nt
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -535,12 +811,10 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
                 </div>
                 <div className="flex gap-2">
                   <button onClick={onCopy} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors">
-                    <Copy className="w-4 h-4" />
-                    Copy
+                    <Copy className="w-4 h-4" />Copy
                   </button>
                   <button onClick={onDownload} className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors">
-                    <Download className="w-4 h-4" />
-                    FASTA
+                    <Download className="w-4 h-4" />FASTA
                   </button>
                 </div>
               </div>
@@ -561,7 +835,7 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
             key={tab}
             onClick={() => setActiveTab(tab)}
             className={cn(
-              "flex-1 py-2.5 text-xs font-semibold tracking-wide uppercase transition-colors",
+              "flex-1 py-2.5 text-xs font-semibold tracking-wide uppercase transition-colors relative",
               activeTab === tab
                 ? "border-b-2 border-blue-500 text-blue-600 bg-white"
                 : "text-slate-400 hover:text-slate-600 bg-slate-50"
@@ -574,14 +848,13 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
 
       {/* ── Tab body ── */}
       <div>
-
         {activeTab === "clm" && (
         <div className="p-4 space-y-3">
 
           {/* CLM sub-mode selector */}
           <div className="flex gap-1 p-0.5 bg-slate-100 rounded-lg">
             <button
-              onClick={() => { setClmMode("clm-generate"); setClmResultSeq(""); setClmResultScore(null); setClmTaskStatus("idle"); }}
+              onClick={() => { if (clmTaskStatus !== "running") { setClmMode("clm-generate"); setClmResultSeq(""); setClmResultScore(null); setClmTaskStatus("idle"); setClmProgress(null); }}}
               className={cn(
                 "flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition-all",
                 clmMode === "clm-generate" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
@@ -590,7 +863,7 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
               <Sparkles className="w-3 h-3" /> De novo Design
             </button>
             <button
-              onClick={() => { setClmMode("clm-score"); setClmResultSeq(""); setClmResultScore(null); setClmTaskStatus("idle"); }}
+              onClick={() => { if (clmTaskStatus !== "running") { setClmMode("clm-score"); setClmResultSeq(""); setClmResultScore(null); setClmTaskStatus("idle"); setClmProgress(null); }}}
               className={cn(
                 "flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition-all",
                 clmMode === "clm-score" ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
@@ -636,13 +909,8 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
               <select
                 value={species}
                 onChange={(e) => {
-                  if (e.target.value === "__taxid__") {
-                    setShowTaxidInput(true);
-                    setTimeout(() => taxidInputRef.current?.focus(), 100);
-                  } else {
-                    handleSpeciesChange(e.target.value);
-                    setShowTaxidInput(false);
-                  }
+                  if (e.target.value === "__taxid__") { setShowTaxidInput(true); setTimeout(() => taxidInputRef.current?.focus(), 100); }
+                  else { handleSpeciesChange(e.target.value); setShowTaxidInput(false); }
                 }}
                 className="w-full p-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 text-xs text-slate-700"
               >
@@ -723,30 +991,31 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
             )}
           </AnimatePresence>
 
-          {/* Run button */}
+          {/* Run / Stop button — toggle based on running state */}
           <button
-            onClick={clmIsRunning ? handleClmStop : handleClmRun}
-            disabled={!clmIsRunning && ((clmMode === "clm-score" && !clmSequence.trim()) || !!clmSeqError)}
+            onClick={clmTaskStatus === "running" ? handleClmStop : handleClmRun}
+            disabled={clmTaskStatus !== "running" && ((clmMode === "clm-score" && !clmSequence.trim()) || !!clmSeqError)}
             className={cn(
-              "w-full flex items-center justify-center gap-2 py-1.5 rounded-lg text-sm font-semibold transition-all",
-              clmIsRunning
-                ? "bg-red-500 hover:bg-red-600 text-white shadow-sm cursor-pointer"
-                : "bg-blue-600 hover:bg-blue-700 text-white shadow-sm"
+              "w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm",
+              clmTaskStatus === "running"
+                ? "bg-red-500 hover:bg-red-600 text-white"
+                : "bg-blue-600 hover:bg-blue-700 text-white"
             )}
           >
-            {clmIsRunning
-              ? <><Square className="w-4 h-4" /> Stop</>
-              : <><Play className="w-4 h-4" /> {clmMode === "clm-generate" ? "Run De novo Design" : "Run Directed Evolution"}</>
-            }
+            {clmTaskStatus === "running" ? (
+              <><Square className="w-4 h-4" /> Stop</>
+            ) : (
+              <><Play className="w-4 h-4" /> {clmMode === "clm-generate" ? "Run De novo Design" : "Run Directed Evolution"}</>
+            )}
           </button>
 
-          {/* Result */}
+          {/* Result / Status area */}
           <ResultCard
             seq={clmResultSeq} score={clmResultScore}
             status={clmTaskStatus} message={clmTaskMessage}
-            isRunning={clmIsRunning}
-            onCopy={() => copyText(clmResultSeq, setClmCopied)}
+            onCopy={() => copyText(clmResultSeq, () => {})}
             onDownload={() => downloadFasta(clmResultSeq)}
+            progressData={clmProgress}
           />
         </div>
         )}
@@ -756,14 +1025,11 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
 
           {/* Sequence input */}
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">
-              Masked Sequence
-            </label>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Masked Sequence</label>
             <textarea
               value={glmSequence}
               onChange={(e) => { setGlmSequence(e.target.value); validateGlmSeq(e.target.value); }}
-              placeholder="Enter sequence with <mask> tokens…
-Example: AUGCUAGC<mask>UAGCUAGC"
+              placeholder="Enter sequence with <mask> tokens…\nExample: AUGCUAGC<mask>UAGCUAGC"
               rows={4}
               className={cn(
                 "w-full p-2.5 rounded-lg border bg-white resize-none focus:outline-none transition-all text-sm font-mono text-slate-700 placeholder:text-slate-300",
@@ -821,9 +1087,7 @@ Example: AUGCUAGC<mask>UAGCUAGC"
                 )}
                 {/* TaxID */}
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">
-                    <Hash className="w-3 h-3 inline mr-1 text-indigo-500" />NCBI TaxID
-                  </label>
+                  <label className="block text-xs font-medium text-slate-500 mb-1"><Hash className="w-3 h-3 inline mr-1 text-indigo-500" />NCBI TaxID</label>
                   <input ref={taxidInputRef} type="number" value={taxidInput}
                     onChange={(e) => { const v = e.target.value; setTaxidInput(v); setTaxid(v ? parseInt(v, 10) : null); }}
                     placeholder="e.g. 9606"
@@ -850,30 +1114,31 @@ Example: AUGCUAGC<mask>UAGCUAGC"
             )}
           </AnimatePresence>
 
-          {/* Run button */}
+          {/* Run / Stop button */}
           <button
-            onClick={glmIsRunning ? handleGlmStop : handleGlmRun}
-            disabled={!glmIsRunning && (!glmSequence.trim() || !!glmSeqError)}
+            onClick={glmTaskStatus === "running" ? handleGlmStop : handleGlmRun}
+            disabled={glmTaskStatus !== "running" && (!glmSequence.trim() || !!glmSeqError)}
             className={cn(
-              "w-full flex items-center justify-center gap-2 py-1.5 rounded-lg text-sm font-semibold transition-all",
-              glmIsRunning
-                ? "bg-red-500 hover:bg-red-600 text-white shadow-sm cursor-pointer"
-                : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
+              "w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm",
+              glmTaskStatus === "running"
+                ? "bg-red-500 hover:bg-red-600 text-white"
+                : "bg-indigo-600 hover:bg-indigo-700 text-white"
             )}
           >
-            {glmIsRunning
-              ? <><Square className="w-4 h-4" /> Stop</>
-              : <><Wand2 className="w-4 h-4" /> Run Domain Redesign</>
-            }
+            {glmTaskStatus === "running" ? (
+              <><Square className="w-4 h-4" /> Stop</>
+            ) : (
+              <><Wand2 className="w-4 h-4" /> Run Domain Redesign</>
+            )}
           </button>
 
-          {/* Result */}
+          {/* Result / Status area */}
           <ResultCard
             seq={glmResultSeq} score={glmResultScore}
             status={glmTaskStatus} message={glmTaskMessage}
-            isRunning={glmIsRunning}
-            onCopy={() => copyText(glmResultSeq, setGlmCopied)}
+            onCopy={() => copyText(glmResultSeq, () => {})}
             onDownload={() => downloadFasta(glmResultSeq)}
+            progressData={glmProgress}
           />
         </div>
         )}

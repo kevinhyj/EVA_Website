@@ -72,13 +72,22 @@ export async function POST(request: NextRequest) {
       transformedBody.taxid = body.taxid;
     }
 
-    // Transform parameters (convert camelCase to snake_case)
-    if (body.temperature !== undefined || body.topK !== undefined || body.maxLength !== undefined) {
+    // Build parameters: check top-level camelCase fields OR nested parameters object
+    // Frontend sends parameters nested inside a "parameters" object
+    const srcParams = body.parameters || {};
+    const hasTemp = body.temperature !== undefined || srcParams.temperature !== undefined;
+    const hasTopK = body.topK !== undefined || srcParams.top_k !== undefined || srcParams.topK !== undefined;
+    const hasMaxLen = body.maxLength !== undefined || srcParams.max_length !== undefined || srcParams.maxLength !== undefined;
+
+    if (hasTemp || hasTopK || hasMaxLen) {
       transformedBody.parameters = {
-        temperature: body.temperature,
-        top_k: body.topK,
-        max_length: body.maxLength
+        temperature: body.temperature ?? srcParams.temperature ?? 0.7,
+        top_k: body.topK ?? srcParams.top_k ?? srcParams.topK ?? 50,
+        max_length: body.maxLength ?? srcParams.max_length ?? srcParams.maxLength ?? 200,
       };
+    } else if (Object.keys(srcParams).length > 0) {
+      // Pass through any other parameters as-is
+      transformedBody.parameters = { ...srcParams };
     }
 
     // Forward request to backend API
