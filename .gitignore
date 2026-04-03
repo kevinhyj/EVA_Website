@@ -79,3 +79,4 @@ logs/
 .env.production.local
 
 24000279_evabio.net_nginx.zip
+*.bak

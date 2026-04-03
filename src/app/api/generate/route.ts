@@ -1,132 +1,83 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawn } from "child_process";
-import path from "path";
-import fs from "fs";
+
+// API endpoint configuration - proxy to FastAPI backend
+const API_BASE_URL = process.env.API_URL || "http://localhost:8001";
 
 export async function POST(request: NextRequest) {
-  let curTaskId = "";
-  let outputDir = "";
-  let checkPointDir = "";
-
   try {
     const body = await request.json();
     const { sequence, species, temperature, topK, maxLength, mode, rnaTypeId, taskId } = body;
-    curTaskId = body.taskId || "";
 
-    if (!curTaskId) {
+    // Validate required fields
+    if (!rnaTypeId) {
       return NextResponse.json(
-        { error: "taskId is required" },
+        { error: "rnaTypeId is required" },
         { status: 400 }
       );
     }
 
-    // 输出目录路径
-    outputDir = path.join("data/output", curTaskId);
-    let clmCheckPointDir = path.join("/rna-multiverse/rnagen", "1400M_1204_mid/checkpoint-25500");
-    let glmCheckPointDir = path.join("/rna-multiverse/rnagen", "1.4B_mid_0104/checkpoint-25500");
-    if (mode === "glm") {
-      checkPointDir = glmCheckPointDir;
-    } else {
-      checkPointDir = clmCheckPointDir;
-    }
+    // Map mode to task_type
+    const modeToTaskType: Record<string, string> = {
+      'clm': 'generate',
+      'glm': 'infill',
+      'clm-generate': 'generate',
+      'glm-infill': 'infill',
+    };
+    const task_type = modeToTaskType[mode || 'clm'] || 'generate';
 
-    // 确保输出目录存在
-    fs.mkdirSync(outputDir, { recursive: true });
+    // Build parameters
+    const params: any = {};
+    if (temperature !== undefined) params.temperature = temperature;
+    if (topK !== undefined) params.top_k = topK;
+    if (maxLength !== undefined) params.max_length = maxLength;
 
-    // 写入 task_state: 1 = running
-    fs.writeFileSync(path.join(outputDir, "task_state"), "1");
+    // Transform to backend format
+    const transformedBody: any = {
+      task_type,
+      rna_type: rnaTypeId,
+    };
 
-    // 将 sequence 保存为 fasta 文件
     if (sequence) {
-      const fastaContent = `>${curTaskId}\n${sequence}`;
-      fs.writeFileSync(path.join(outputDir, "input.fa"), fastaContent);
-    }
-
-    // 构建 Python 脚本路径
-    //const scriptPath = path.join(process.cwd(), "..", "web", "generate.py");
-    const scriptPath = path.join(process.cwd(), "/rna-multiverse/rnaverse_web/tools", "generate.py");
-
-    // 构建参数
-    const args = [
-      scriptPath,
-      "--checkpoint", checkPointDir,
-      //"--sequence", sequence || "",
-      "--species", species || "",
-      "--temperature", (temperature || 0.7).toString(),
-      "--topk", (topK || 50).toString(),
-      "--max_length", (maxLength || 200).toString(),
-      "--format", mode || "clm",
-      "--rna_type", rnaTypeId || "",
-      "--output", outputDir,
-    ];
-
-    // 当 sequence 不为空时，添加 --input 参数
-    if (sequence) {
-      args.push("--input", path.join(outputDir, "input.fa"));
-    }
-
-    // 等待 Python 脚本执行完成
-    await new Promise<void>((resolve) => {
-      const pythonProcess = spawn("python", args);
-
-      // 将 Python 控制台输出直接输出到 Nginx 进程控制台
-      pythonProcess.stdout.on("data", (data) => {
-        process.stdout.write(data.toString());
-      });
-
-      pythonProcess.stderr.on("data", (data) => {
-        process.stderr.write(data.toString());
-      });
-
-      pythonProcess.on("close", () => {
-        resolve();
-      });
-
-      pythonProcess.on("error", () => {
-        resolve();
-      });
-    });
-
-    // 脚本执行完毕，检查结果文件是否存在
-    const resultFile = path.join(outputDir, "result.fa");
-    if (fs.existsSync(resultFile)) {
-      // 写入 task_state: 2 = completed
-      fs.writeFileSync(path.join(outputDir, "task_state"), "2");
-
-      // 读取结果
-      const resultContent = fs.readFileSync(resultFile, "utf-8");
-      return NextResponse.json({
-        message: "Task completed",
-        taskId: curTaskId,
-        status: "completed",
-        sequence: resultContent.trim()
-      });
-    } else {
-      // 结果文件不存在，写入 task_state: 3 = failed
-      fs.writeFileSync(path.join(outputDir, "task_state"), "3");
-      return NextResponse.json({
-        message: "Task completed but no result file",
-        taskId: curTaskId,
-        status: "completed_no_result"
-      });
-    }
-
-  } catch (error) {
-    console.error("Generate API error:", error);
-    // 写入 task_state: 3 = failed
-    if (curTaskId && outputDir) {
-      try {
-        fs.writeFileSync(path.join(outputDir, "task_state"), "3");
-      } catch {
-        // 忽略文件写入错误
+      // Convert <mask> tokens to [MASK] for infill tasks
+      if (task_type === 'infill') {
+        transformedBody.sequence = sequence.replace(/<mask>/gi, '[MASK]');
+      } else {
+        transformedBody.sequence = sequence;
       }
     }
-    // 返回任务完成但不抛出异常
-    return NextResponse.json({
-      message: "Task completed with error",
-      taskId: curTaskId,
-      status: "completed_with_error",
-      error: error instanceof Error ? error.message : "Unknown error"
+
+    if (species) {
+      transformedBody.species = species;
+    }
+
+    if (Object.keys(params).length > 0) {
+      transformedBody.parameters = params;
+    }
+
+    // Forward request to backend API
+    const response = await fetch(`${API_BASE_URL}/api/task/submit`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(transformedBody),
     });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      return NextResponse.json(
+        { error: data.detail || "Failed to submit task" },
+        { status: response.status }
+      );
+    }
+
+    return NextResponse.json(data);
+  } catch (error) {
+    console.error("Generate API error:", error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to connect to backend API" },
+      { status: 500 }
+    );
   }
 }

@@ -94,7 +94,8 @@ export const RNA_TYPES: RNAType[] = [
       { title: 'Codon Adaptation', metric: 'CAI', value: '0.95', description: 'Near-optimal codon adaptation index across human codons.', paper: '#' },
     ],
     visualizations: [
-      { title: 'mRNA Length Distribution Analysis', description: 'Comparative length distribution analysis of mRNA sequences across benchmark datasets.', imagePath: '/eva1/output/mRNA_comparison.webp', imageAlt: 'mRNA length distribution comparison' },
+      { title: 'mRNA Distribution Analysis', description: 'Distributional comparisons between AI generated RNAs and natural RNAs.', imagePath: '/eva1/output/mRNA_comparison.webp', imageAlt: 'mRNA distribution comparison' },
+      { title: 'circRNA Distribution Analysis', description: 'Distributional comparisons between AI generated RNAs and natural RNAs.', imagePath: '/eva1/output/circRNA_comparison.webp', imageAlt: 'circRNA distribution comparison' },
     ],
   },
   {
@@ -110,7 +111,7 @@ export const RNA_TYPES: RNAType[] = [
       { title: 'Suppression Efficiency', metric: 'Read-through', value: '78%', description: 'Efficient amber codon suppression for ncAA incorporation.', paper: '#' },
     ],
     visualizations: [
-      { title: 'tRNA Length Distribution Analysis', description: 'Comparative length distribution analysis of tRNA sequences across benchmark datasets.', imagePath: '/eva1/output/tRNA_comparison.webp', imageAlt: 'tRNA length distribution comparison' },
+      { title: 'tRNA Distribution Analysis', description: 'Distributional comparisons between AI generated RNAs and natural RNAs.', imagePath: '/eva1/output/tRNA_comparison.webp', imageAlt: 'tRNA distribution comparison' },
     ],
   },
   {
@@ -125,7 +126,7 @@ export const RNA_TYPES: RNAType[] = [
       { title: 'Ribosome Assembly', metric: 'Success Rate', value: '88%', description: 'Functional ribosome assembly with modified rRNA.', paper: '#' },
     ],
     visualizations: [
-      { title: 'rRNA Length Distribution Analysis', description: 'Comparative length distribution analysis of rRNA sequences across benchmark datasets.', imagePath: '/eva1/output/rRNA_comparison.webp', imageAlt: 'rRNA length distribution comparison' },
+      { title: 'rRNA Distribution Analysis', description: 'Distributional comparisons between AI generated RNAs and natural RNAs.', imagePath: '/eva1/output/rRNA_comparison.webp', imageAlt: 'rRNA distribution comparison' },
     ],
   },
   {
@@ -141,7 +142,7 @@ export const RNA_TYPES: RNAType[] = [
       { title: 'Silencing Efficiency', metric: 'Knockdown', value: '85%', description: 'Average gene silencing with designed miRNA mimics.', paper: '#' },
     ],
     visualizations: [
-      { title: 'miRNA Length Distribution Analysis', description: 'Comparative length distribution analysis of miRNA sequences across benchmark datasets.', imagePath: '/eva1/output/miRNA_comparison.webp', imageAlt: 'miRNA length distribution comparison' },
+      { title: 'miRNA Distribution Analysis', description: 'Distributional comparisons between AI generated RNAs and natural RNAs.', imagePath: '/eva1/output/miRNA_comparison.webp', imageAlt: 'miRNA distribution comparison' },
     ],
   },
   {
@@ -156,7 +157,7 @@ export const RNA_TYPES: RNAType[] = [
       { title: 'Off-target Score', metric: 'Specificity', value: '0.98', description: 'Minimal off-target effects with optimized seed regions.', paper: '#' },
     ],
     visualizations: [
-      { title: 'siRNA Length Distribution Analysis', description: 'Comparative length distribution analysis of siRNA sequences across benchmark datasets.', imagePath: '/eva1/output/miRNA_comparison.webp', imageAlt: 'siRNA length distribution comparison' },
+      { title: 'siRNA Distribution Analysis', description: 'Distributional comparisons between AI generated RNAs and natural RNAs.', imagePath: '/eva1/output/miRNA_comparison.webp', imageAlt: 'siRNA distribution comparison' },
     ],
   },
   {
@@ -172,7 +173,8 @@ export const RNA_TYPES: RNAType[] = [
       { title: 'Circularization', metric: 'Efficiency', value: '90%', description: 'High-efficiency circularization with optimized splice sites.', paper: '#' },
     ],
     visualizations: [
-      { title: 'circRNA Length Distribution Analysis', description: 'Comparative length distribution analysis of circRNA sequences across benchmark datasets.', imagePath: '/eva1/output/circRNA_comparison.webp', imageAlt: 'circRNA length distribution comparison' },
+      { title: 'circRNA Distribution Analysis', description: 'Distributional comparisons between AI generated RNAs and natural RNAs.', imagePath: '/eva1/output/circRNA_comparison.webp', imageAlt: 'circRNA distribution comparison' },
+      { title: 'mRNA Distribution Analysis', description: 'Distributional comparisons between AI generated RNAs and natural RNAs.', imagePath: '/eva1/output/mRNA_comparison.webp', imageAlt: 'mRNA distribution comparison' },
     ],
   },
   {
@@ -187,7 +189,7 @@ export const RNA_TYPES: RNAType[] = [
       { title: 'Gene Regulation', metric: 'Fold Change', value: '8.5x', description: 'Effective transcriptional regulation via synthetic lncRNA.', paper: '#' },
     ],
     visualizations: [
-      { title: 'lncRNA Length Distribution Analysis', description: 'Comparative length distribution analysis of lncRNA sequences across benchmark datasets.', imagePath: '/eva1/output/lncRNA_comparison.webp', imageAlt: 'lncRNA length distribution comparison' },
+      { title: 'lncRNA Distribution Analysis', description: 'Distributional comparisons between AI generated RNAs and natural RNAs.', imagePath: '/eva1/output/lncRNA_comparison.webp', imageAlt: 'lncRNA distribution comparison' },
     ],
   },
   {
@@ -201,7 +203,7 @@ export const RNA_TYPES: RNAType[] = [
       { title: 'Splicing Correction', metric: 'Efficiency', value: '82%', description: 'Effective exon inclusion rescue with modified snRNA.', paper: '#' },
     ],
     visualizations: [
-      { title: 'snRNA Length Distribution Analysis', description: 'Comparative length distribution analysis of snRNA sequences across benchmark datasets.', imagePath: '/eva1/output/snRNA_comparison.webp', imageAlt: 'snRNA length distribution comparison' },
+      { title: 'snRNA Distribution Analysis', description: 'Distributional comparisons between AI generated RNAs and natural RNAs.', imagePath: '/eva1/output/snRNA_comparison.webp', imageAlt: 'snRNA distribution comparison' },
     ],
   },
   {
@@ -215,7 +217,7 @@ export const RNA_TYPES: RNAType[] = [
       { title: 'Modification Accuracy', metric: 'Site Specificity', value: '96%', description: 'Precise targeting of rRNA modification sites.', paper: '#' },
     ],
     visualizations: [
-      { title: 'snoRNA Length Distribution Analysis', description: 'Comparative length distribution analysis of snoRNA sequences across benchmark datasets.', imagePath: '/eva1/output/snoRNA_comparison.webp', imageAlt: 'snoRNA length distribution comparison' },
+      { title: 'snoRNA Distribution Analysis', description: 'Distributional comparisons between AI generated RNAs and natural RNAs.', imagePath: '/eva1/output/snoRNA_comparison.webp', imageAlt: 'snoRNA distribution comparison' },
     ],
   },
   {
@@ -229,7 +231,7 @@ export const RNA_TYPES: RNAType[] = [
       { title: 'Transposon Silencing', metric: 'Repression', value: '89%', description: 'Effective transposon silencing in germline cells.', paper: '#' },
     ],
     visualizations: [
-      { title: 'piRNA Length Distribution Analysis', description: 'Comparative length distribution analysis of piRNA sequences across benchmark datasets.', imagePath: '/eva1/output/piRNA_comparison.webp', imageAlt: 'piRNA length distribution comparison' },
+      { title: 'piRNA Distribution Analysis', description: 'Distributional comparisons between AI generated RNAs and natural RNAs.', imagePath: '/eva1/output/piRNA_comparison.webp', imageAlt: 'piRNA distribution comparison' },
     ],
   },
   {
@@ -244,7 +246,7 @@ export const RNA_TYPES: RNAType[] = [
       { title: 'Orthogonality', metric: 'Crosstalk', value: '<2%', description: 'Minimal crosstalk between orthogonal sRNA regulators.', paper: '#' },
     ],
     visualizations: [
-      { title: 'sRNA Length Distribution Analysis', description: 'Comparative length distribution analysis of sRNA sequences across benchmark datasets.', imagePath: '/eva1/output/sRNA_comparison.webp', imageAlt: 'sRNA length distribution comparison' },
+      { title: 'sRNA Distribution Analysis', description: 'Distributional comparisons between AI generated RNAs and natural RNAs.', imagePath: '/eva1/output/sRNA_comparison.webp', imageAlt: 'sRNA distribution comparison' },
     ],
   },
   {
@@ -259,7 +261,7 @@ export const RNA_TYPES: RNAType[] = [
       { title: 'Antiviral Targets', metric: 'Validated', value: '23', description: 'Novel antiviral target sites identified by the model.', paper: '#' },
     ],
     visualizations: [
-      { title: 'Viral RNA Length Distribution Analysis', description: 'Comparative length distribution analysis of viral RNA sequences across benchmark datasets.', imagePath: '/eva1/output/viral_comparison.webp', imageAlt: 'viral RNA length distribution comparison' },
+      { title: 'Viral RNA Distribution Analysis', description: 'Distributional comparisons between AI generated RNAs and natural RNAs.', imagePath: '/eva1/output/viral_comparison.webp', imageAlt: 'viral RNA distribution comparison' },
     ],
   },
 ];

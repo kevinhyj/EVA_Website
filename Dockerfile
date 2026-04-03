@@ -1,6 +1,11 @@
 # Frontend Dockerfile for RNA Inference Web UI
 FROM node:20-alpine AS base
 
+# Install glibc compatibility layer for Next.js Turbopack (requires GNU ld-linux)
+RUN apk add --no-cache gcompat libc6-compat && \
+    ln -sf /usr/lib/libgcompat.so.0 /lib/ld-linux-x86-64.so.2 && \
+    ln -sf /usr/lib/libc6-compat.so.1 /lib/libc.so.6
+
 # Install dependencies only when needed
 FROM base AS deps
 WORKDIR /app

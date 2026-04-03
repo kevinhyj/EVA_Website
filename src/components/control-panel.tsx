@@ -16,6 +16,7 @@ import {
   Settings2,
   Square,
   Loader2,
+  Scissors,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { RNAType } from "@/data/rnaTypes";
@@ -90,13 +91,16 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
   const [species, setSpecies] = useState("");
   const [taxid, setTaxid] = useState<number | null>(null);
   const [taxidInput, setTaxidInput] = useState("");
-  const [temperature, setTemperature] = useState(0.7);
+  const [temperature, setTemperature] = useState(1.0);
   const [topK, setTopK] = useState(50);
   const [showTaxidInput, setShowTaxidInput] = useState(false);
   const [activeTab, setActiveTab] = useState<"clm" | "glm">("clm");
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const glmTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const glmEditorRef = useRef<HTMLDivElement>(null);
+  const isUpdatingRef = useRef(false);
   const taxidInputRef = useRef<HTMLInputElement>(null);
   const clmTimerRef = useRef<NodeJS.Timeout | null>(null);
   const glmTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -701,13 +705,19 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
 
   /* ---- species change ---- */
   const handleSpeciesChange = (val: string) => {
-    setSpecies(val);
-    if (val && SPECIES_TAXID_MAP[val]) {
-      setTaxid(SPECIES_TAXID_MAP[val]);
-      setTaxidInput(String(SPECIES_TAXID_MAP[val]));
-    } else if (val !== "__taxid__") {
-      setTaxid(null);
-      setTaxidInput("");
+    if (val === "__taxid__") {
+      // When selecting "Enter TaxID manually", set species to the current TaxID input value
+      setSpecies(taxidInput || "");
+      setTaxid(taxidInput ? parseInt(taxidInput, 10) : null);
+    } else {
+      setSpecies(val);
+      if (val && SPECIES_TAXID_MAP[val]) {
+        setTaxid(SPECIES_TAXID_MAP[val]);
+        setTaxidInput(String(SPECIES_TAXID_MAP[val]));
+      } else {
+        setTaxid(null);
+        setTaxidInput("");
+      }
     }
   };
 
@@ -716,6 +726,42 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  /* ---- insert <mask> at cursor position ---- */
+  const insertMask = () => {
+    const ta = glmTextareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const before = glmSequence.slice(0, start);
+    const after = glmSequence.slice(end);
+    const newSeq = before + "<mask>" + after;
+    setGlmSequence(newSeq);
+    validateGlmSeq(newSeq);
+    // Restore cursor after <mask>
+    requestAnimationFrame(() => {
+      ta.focus();
+      const newPos = start + 6;
+      ta.setSelectionRange(newPos, newPos);
+    });
+  };
+
+  /* ---- insert sequence helper for GLM ---- */
+  const insertSequence = (seq: string) => {
+    const ta = glmTextareaRef.current;
+    if (!ta) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const before = glmSequence.slice(0, start);
+    const after = glmSequence.slice(end);
+    const newSeq = before + seq + after;
+    setGlmSequence(newSeq);
+    validateGlmSeq(newSeq);
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(start + seq.length, start + seq.length);
+    });
   };
 
   const downloadFasta = (seq: string) => {
@@ -909,8 +955,9 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
               <select
                 value={species}
                 onChange={(e) => {
+                  handleSpeciesChange(e.target.value);
                   if (e.target.value === "__taxid__") { setShowTaxidInput(true); setTimeout(() => taxidInputRef.current?.focus(), 100); }
-                  else { handleSpeciesChange(e.target.value); setShowTaxidInput(false); }
+                  else { setShowTaxidInput(false); }
                 }}
                 className="w-full p-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 text-xs text-slate-700"
               >
@@ -918,6 +965,9 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
                 {speciesList.map((s) => (
                   <option key={s} value={s}>{SPECIES_TAXID_MAP[s] ? `${s} (${SPECIES_TAXID_MAP[s]})` : s}</option>
                 ))}
+                {species && !speciesList.includes(species) && species !== "__taxid__" && (
+                  <option value={species} className="text-blue-600 font-medium">TaxID: {species}</option>
+                )}
                 <option disabled />
                 <option value="__taxid__">+ Enter TaxID manually</option>
               </select>
@@ -932,7 +982,7 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
                 ref={taxidInputRef}
                 type="number"
                 value={taxidInput}
-                onChange={(e) => { const v = e.target.value; setTaxidInput(v); setTaxid(v ? parseInt(v, 10) : null); }}
+                onChange={(e) => { const v = e.target.value; setTaxidInput(v); setTaxid(v ? parseInt(v, 10) : null); setSpecies(v); }}
                 placeholder="e.g. 9606"
                 className="w-full p-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 text-xs font-mono text-slate-700"
               />
@@ -1023,24 +1073,124 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
         {activeTab === "glm" && (
         <div className="p-4 space-y-3">
 
-          {/* Sequence input */}
-          <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Masked Sequence</label>
+          {/* ── Masked Sequence input ── */}
+          <div className="space-y-2">
+            {/* Header row: label + prominent Add Mask button */}
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                Sequence with Mask Regions
+              </label>
+              {/* Prominent Add Mask button */}
+              <button
+                onClick={insertMask}
+                disabled={glmTaskStatus === "running"}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Add a &lt;mask&gt; region at the cursor position"
+              >
+                <Scissors className="w-3.5 h-3.5" />
+                Add Mask Region
+              </button>
+            </div>
+
+            {/* Template / Quick-insert toolbar */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs text-slate-400 font-medium">Templates:</span>
+              {/* Each template: flanking RNA + <mask> + flanking RNA */}
+              <button
+                onClick={() => insertSequence("AUGC<mask>UAGC")}
+                disabled={glmTaskStatus === "running"}
+                title="Small domain scaffold (flanking 4nt each side)"
+                className="px-2 py-0.5 rounded text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed font-mono"
+              >
+                Small (4+4nt)
+              </button>
+              <button
+                onClick={() => insertSequence("AUGCGAUC<mask>GAUCGCUA")}
+                disabled={glmTaskStatus === "running"}
+                title="Medium domain scaffold (flanking 8nt each side)"
+                className="px-2 py-0.5 rounded text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed font-mono"
+              >
+                Medium (8+8nt)
+              </button>
+              <button
+                onClick={() => insertSequence("GCGCAGCUAGC<mask>GCUAGCUAGCGC")}
+                disabled={glmTaskStatus === "running"}
+                title="Large domain scaffold (flanking 11nt each side)"
+                className="px-2 py-0.5 rounded text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed font-mono"
+              >
+                Large (11+11nt)
+              </button>
+              <button
+                onClick={() => insertSequence("GGC<mask>GCC")}
+                disabled={glmTaskStatus === "running"}
+                title="Minimal scaffold (flanking 3nt each side)"
+                className="px-2 py-0.5 rounded text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed font-mono"
+              >
+                Minimal (3+3nt)
+              </button>
+              {/* Clear button */}
+              <button
+                onClick={() => { setGlmSequence(""); setGlmSeqError(""); }}
+                disabled={glmTaskStatus === "running" || !glmSequence}
+                className="px-2 py-0.5 rounded text-xs bg-red-50 hover:bg-red-100 text-red-500 border border-red-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ml-auto"
+              >
+                Clear
+              </button>
+            </div>
+
+            {/* Textarea input */}
             <textarea
+              ref={glmTextareaRef}
               value={glmSequence}
               onChange={(e) => { setGlmSequence(e.target.value); validateGlmSeq(e.target.value); }}
-              placeholder="Enter sequence with <mask> tokens…\nExample: AUGCUAGC<mask>UAGCUAGC"
-              rows={4}
+              placeholder={"Type or paste your RNA sequence, then click 'Add Mask Region' to mark redesign sites.\nExample: AUGCUAGC[click Add Mask]GCUAGC\nTip: You can add multiple &lt;mask&gt; tokens to redesign several regions at once."}
+              rows={5}
+              disabled={glmTaskStatus === "running"}
               className={cn(
-                "w-full p-2.5 rounded-lg border bg-white resize-none focus:outline-none transition-all text-sm font-mono text-slate-700 placeholder:text-slate-300",
-                glmSeqError ? "border-red-400 focus:border-red-400 focus:ring-2 focus:ring-red-100" : "border-slate-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                "w-full p-2.5 rounded-lg border bg-white resize-none focus:outline-none transition-all text-xs font-mono text-slate-800 placeholder:text-slate-300 disabled:opacity-60 disabled:cursor-not-allowed",
+                "focus:ring-2",
+                glmSeqError ? "border-red-400 focus:border-red-500 focus:ring-red-100" : "border-slate-200 focus:border-blue-400 focus:ring-blue-100"
               )}
+              spellCheck={false}
             />
-            <div className="flex items-center justify-between mt-1">
+
+            {/* Live highlight preview - shows text with <mask> highlighted */}
+            {glmSequence.length > 0 && (() => {
+              const maskCount = (glmSequence.match(/<mask>/gi) || []).length;
+              return (
+                <div className="p-2.5 rounded-lg border border-yellow-200 bg-yellow-50 overflow-auto whitespace-pre-wrap break-all leading-relaxed text-xs font-mono max-h-24">
+                  {glmSequence.split(/(<mask>)/gi).map((part, i) =>
+                    part.toLowerCase() === "<mask>" ? (
+                      <span key={i} className="bg-yellow-300 text-yellow-950 font-bold rounded px-0.5">{part}</span>
+                    ) : (
+                      <span key={i} className="text-slate-700">{part}</span>
+                    )
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Footer: length + mask count badge */}
+            <div className="flex items-center justify-between">
               <span className={cn("text-xs", glmSeqError ? "text-red-500" : "text-slate-400")}>
-                {glmSeqError || `${glmSequence.length.toLocaleString()} / ${MAX_SEQ_LEN.toLocaleString()} nt`}
+                {glmSeqError || `${glmSequence.length.toLocaleString()} nt`}
               </span>
-              <span className="text-xs text-slate-400">Use &lt;mask&gt; to mark regions</span>
+              {glmSequence.length > 0 && (() => {
+                const maskCount = (glmSequence.match(/<mask>/gi) || []).length;
+                if (maskCount === 0) {
+                  return (
+                    <span className="text-xs text-amber-500 font-medium flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" />
+                      Click "Add Mask Region" to mark redesign sites
+                    </span>
+                  );
+                }
+                return (
+                  <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700 border border-blue-200">
+                    {maskCount} mask region{maskCount > 1 ? "s" : ""} — {maskCount > 1 ? "multi-region" : "single-region"} redesign
+                  </span>
+                );
+              })()}
             </div>
           </div>
 
@@ -1071,44 +1221,48 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
                     <select
                       value={species}
                       onChange={(e) => {
+                        handleSpeciesChange(e.target.value);
                         if (e.target.value === "__taxid__") { setShowTaxidInput(true); setTimeout(() => taxidInputRef.current?.focus(), 100); }
-                        else { handleSpeciesChange(e.target.value); setShowTaxidInput(false); }
+                        else { setShowTaxidInput(false); }
                       }}
-                      className="w-full p-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition-all text-xs text-slate-700"
+                      className="w-full p-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all text-xs text-slate-700"
                     >
                       <option value="">Auto-detect</option>
                       {speciesList.map((s) => (
                         <option key={s} value={s}>{SPECIES_TAXID_MAP[s] ? `${s} (${SPECIES_TAXID_MAP[s]})` : s}</option>
                       ))}
+                      {species && !speciesList.includes(species) && species !== "__taxid__" && (
+                        <option value={species} className="text-blue-600 font-medium">TaxID: {species}</option>
+                      )}
                       <option disabled />
-                      <option value="__taxid__" className="text-indigo-600 font-medium">+ Enter TaxID manually</option>
+                      <option value="__taxid__" className="text-blue-600 font-medium">+ Enter TaxID manually</option>
                     </select>
                   </div>
                 )}
                 {/* TaxID */}
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1"><Hash className="w-3 h-3 inline mr-1 text-indigo-500" />NCBI TaxID</label>
+                  <label className="block text-xs font-medium text-slate-500 mb-1"><Hash className="w-3 h-3 inline mr-1 text-blue-500" />NCBI TaxID</label>
                   <input ref={taxidInputRef} type="number" value={taxidInput}
-                    onChange={(e) => { const v = e.target.value; setTaxidInput(v); setTaxid(v ? parseInt(v, 10) : null); }}
+                    onChange={(e) => { const v = e.target.value; setTaxidInput(v); setTaxid(v ? parseInt(v, 10) : null); setSpecies(v); }}
                     placeholder="e.g. 9606"
-                    className="w-full p-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition-all text-xs text-slate-700"
+                    className="w-full p-2 rounded-lg border border-slate-200 bg-white focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100 transition-all text-xs text-slate-700"
                   />
                 </div>
                 {/* Temperature */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-xs font-medium text-slate-500">Temperature</label>
-                    <span className="text-xs font-mono text-indigo-500">{temperature}</span>
+                    <span className="text-xs font-mono text-blue-500">{temperature}</span>
                   </div>
-                  <input type="range" min={0.1} max={2.0} step={0.1} value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))} className="w-full accent-indigo-500" />
+                  <input type="range" min={0.1} max={2.0} step={0.1} value={temperature} onChange={(e) => setTemperature(parseFloat(e.target.value))} className="w-full accent-blue-500" />
                 </div>
                 {/* Top-K */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-xs font-medium text-slate-500">Top-K</label>
-                    <span className="text-xs font-mono text-indigo-500">{topK}</span>
+                    <span className="text-xs font-mono text-blue-500">{topK}</span>
                   </div>
-                  <input type="range" min={1} max={100} step={1} value={topK} onChange={(e) => setTopK(parseInt(e.target.value))} className="w-full accent-indigo-500" />
+                  <input type="range" min={1} max={100} step={1} value={topK} onChange={(e) => setTopK(parseInt(e.target.value))} className="w-full accent-blue-500" />
                 </div>
               </motion.div>
             )}
@@ -1117,12 +1271,12 @@ export function ControlPanel({ rnaType, prefillSequence, prefillSpecies, prefill
           {/* Run / Stop button */}
           <button
             onClick={glmTaskStatus === "running" ? handleGlmStop : handleGlmRun}
-            disabled={glmTaskStatus !== "running" && (!glmSequence.trim() || !!glmSeqError)}
+            disabled={glmTaskStatus !== "running" && (!glmSequence.trim() || !!glmSeqError || !(glmSequence.includes("<mask>")))}
             className={cn(
               "w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all shadow-sm",
               glmTaskStatus === "running"
                 ? "bg-red-500 hover:bg-red-600 text-white"
-                : "bg-indigo-600 hover:bg-indigo-700 text-white"
+                : "bg-blue-600 hover:bg-blue-700 text-white"
             )}
           >
             {glmTaskStatus === "running" ? (
